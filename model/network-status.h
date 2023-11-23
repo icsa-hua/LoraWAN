@@ -1,3 +1,4 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2018 University of Padova
  *
@@ -16,23 +17,24 @@
  *
  * Authors: Martina Capuzzo <capuzzom@dei.unipd.it>
  *          Davide Magrin <magrinda@dei.unipd.it>
+ * Modified by: QiuYukang <b612n@qq.com>
+ * Modified by: icsa-hua <info_icsa@hua.gr>
  */
 
 #ifndef NETWORK_STATUS_H
 #define NETWORK_STATUS_H
 
-#include "class-a-end-device-lorawan-mac.h"
-#include "end-device-status.h"
-#include "gateway-status.h"
-#include "lora-device-address.h"
-#include "network-scheduler.h"
+#include "ns3/end-device-status.h"
+#include "ns3/class-a-end-device-lorawan-mac.h"
+#include "ns3/class-c-end-device-lorawan-mac.h"
+#include "ns3/gateway-status.h"
+#include "ns3/lora-device-address.h"
+#include "ns3/network-scheduler.h"
 
 #include <iterator>
 
-namespace ns3
-{
-namespace lorawan
-{
+namespace ns3 {
+namespace lorawan {
 
 /**
  * This class represents the knowledge about the state of the network that is
@@ -45,79 +47,97 @@ namespace lorawan
  */
 class NetworkStatus : public Object
 {
-  public:
-    static TypeId GetTypeId();
+public:
+  static TypeId GetTypeId (void);
 
-    NetworkStatus();
-    ~NetworkStatus() override;
+  NetworkStatus ();
+  virtual ~NetworkStatus ();
 
-    /**
-     * Add a device to the ones that are tracked by this NetworkStatus object.
-     */
-    void AddNode(Ptr<ClassAEndDeviceLorawanMac> edMac);
+  /**
+   * Add a device to the ones that are tracked by this NetworkStatus object.
+   */
+  void AddNode (Ptr<EndDeviceLorawanMac> edMac);
 
-    /**
-     * Add this gateway to the list of gateways connected to the network.
-     *
-     * Each GW is identified by its Address in the NS-GW network.
-     */
-    void AddGateway(Address& address, Ptr<GatewayStatus> gwStatus);
+  /**
+   * Add this gateway to the list of gateways connected to the network.
+   *
+   * Each GW is identified by its Address in the NS-GW network.
+   */
+  void AddGateway (Address &address, Ptr<GatewayStatus> gwStatus);
 
-    /**
-     * Update network status on the received packet.
-     *
-     * \param packet the received packet.
-     * \param address the gateway this packet was received from.
-     */
-    void OnReceivedPacket(Ptr<const Packet> packet, const Address& gwaddress);
+  /**
+   * Update network status on the received packet.
+   *
+   * \param packet the received packet.
+   * \param address the gateway this packet was received from.
+   */
+  void OnReceivedPacket (Ptr<const Packet> packet, const Address &gwaddress);
 
-    /**
-     * Return whether the specified device needs a reply.
-     *
-     * \param deviceAddress the address of the device we are interested in.
-     */
-    bool NeedsReply(LoraDeviceAddress deviceAddress);
+  /**
+   * Return whether the specified device needs a reply.
+   *
+   * \param deviceAddress the address of the device we are interested in.
+   */
+  bool NeedsReply (LoraDeviceAddress deviceAddress);
 
-    /**
-     * Return whether we have a gateway that is available to send a reply to the
-     * specified device.
-     *
-     * \param deviceAddress the address of the device we are interested in.
-     */
-    Address GetBestGatewayForDevice(LoraDeviceAddress deviceAddress, int window);
+  /**
+   * Return whether we have a gateway that is available to send a reply to the
+   * specified device.
+   *
+   * \param deviceAddress the address of the device we are interested in.
+   */
+  Address GetBestGatewayForDevice (LoraDeviceAddress deviceAddress, int window);
 
-    /**
-     * Send a packet through a Gateway.
-     *
-     * This function assumes that the packet is already tagged with a LoraTag
-     * that will inform the gateway of the parameters to use for the
-     * transmission.
-     */
-    void SendThroughGateway(Ptr<Packet> packet, Address gwAddress);
+  /**
+   * Get all addresses of gateway which is available for transmission
+   */
+  std::list<Address> GetAvalibleGatewaysForBroadcast ();
 
-    /**
-     * Get the reply for the specified device address.
-     */
-    Ptr<Packet> GetReplyForDevice(LoraDeviceAddress edAddress, int windowNumber);
+  /**
+   * Create a broadcast packet for end devices
+   * 
+   * \param data payload for broadcast frame
+   */
+  Ptr<Packet> CreateBroadcastPacket (Ptr<Packet> data);
 
-    /**
-     * Get the EndDeviceStatus for the device that sent a packet.
-     */
-    Ptr<EndDeviceStatus> GetEndDeviceStatus(Ptr<const Packet> packet);
+  /**
+   * Send a packet through a Gateway.
+   *
+   * This function assumes that the packet is already tagged with a LoraTag
+   * that will inform the gateway of the parameters to use for the
+   * transmission.
+   */
+  void SendThroughGateway (Ptr<Packet> packet, Address gwAddress);
 
-    /**
-     * Get the EndDeviceStatus corresponding to a LoraDeviceAddress.
-     */
-    Ptr<EndDeviceStatus> GetEndDeviceStatus(LoraDeviceAddress address);
+  /**
+   * Get the reply for the specified device address.
+   */
+  Ptr<Packet> GetReplyForDevice (LoraDeviceAddress edAddress, int windowNumber);
 
-    /**
-     * Return the number of end devices currently managed by the server.
-     */
-    int CountEndDevices();
+  /**
+   * Get the data packet for the specified device address.
+   */
+  Ptr<Packet> GetDataPacketForDevice (Ptr<Packet> data, LoraDeviceAddress edAddress, int windowNumber);
 
-  public:
-    std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> m_endDeviceStatuses;
-    std::map<Address, Ptr<GatewayStatus>> m_gatewayStatuses;
+
+  /**
+   * Get the EndDeviceStatus for the device that sent a packet.
+   */
+  Ptr<EndDeviceStatus> GetEndDeviceStatus (Ptr<Packet const> packet);
+
+  /**
+   * Get the EndDeviceStatus corresponding to a LoraDeviceAddress.
+   */
+  Ptr<EndDeviceStatus> GetEndDeviceStatus (LoraDeviceAddress address);
+
+  /**
+   * Return the number of end devices currently managed by the server.
+   */
+  int CountEndDevices (void);
+
+public:
+  std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> m_endDeviceStatuses;
+  std::map<Address, Ptr<GatewayStatus>> m_gatewayStatuses;
 };
 
 } // namespace lorawan
