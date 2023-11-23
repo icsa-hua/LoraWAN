@@ -15,7 +15,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Davide Magrin <magrinda@dei.unipd.it>
- * Edited: icsa-hua <info_icsa@hua.gr>
+ * Modified by: icsa-hua <info_icsa@hua.gr>
  */
 
 #include "ns3/lora-helper.h"
