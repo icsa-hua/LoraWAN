@@ -15,58 +15,63 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Davide Magrin <magrinda@dei.unipd.it>
+ * Modified by: QiuYukang <b612n@qq.com>
+ * Modified by: icsa-hua <info_icsa@hua.gr>
  */
 
 #ifndef NETWORK_SCHEDULER_H
 #define NETWORK_SCHEDULER_H
 
-#include "lora-device-address.h"
-#include "lora-frame-header.h"
-#include "lorawan-mac-header.h"
-#include "network-controller.h"
-#include "network-status.h"
-
-#include "ns3/core-module.h"
 #include "ns3/object.h"
 #include "ns3/packet.h"
+#include "ns3/core-module.h"
+#include "ns3/lora-device-address.h"
+#include "ns3/lorawan-mac-header.h"
+#include "ns3/lora-frame-header.h"
+#include "ns3/network-controller.h"
+#include "ns3/network-status.h"
 
-namespace ns3
-{
-namespace lorawan
-{
+namespace ns3 {
+namespace lorawan {
 
 class NetworkStatus;     // Forward declaration
-class NetworkController; // Forward declaration
+class NetworkController;     // Forward declaration
 
 class NetworkScheduler : public Object
 {
-  public:
-    static TypeId GetTypeId();
+public:
+  static TypeId GetTypeId (void);
 
-    NetworkScheduler();
-    NetworkScheduler(Ptr<NetworkStatus> status, Ptr<NetworkController> controller);
-    ~NetworkScheduler() override;
+  NetworkScheduler ();
+  NetworkScheduler (Ptr<NetworkStatus> status,
+                    Ptr<NetworkController> controller);
+  virtual ~NetworkScheduler ();
 
-    /**
-     * Method called by NetworkServer to inform the Scheduler of a newly arrived
-     * uplink packet. This function schedules the OnReceiveWindowOpportunity
-     * events 1 and 2 seconds later.
-     */
-    void OnReceivedPacket(Ptr<const Packet> packet);
+  /**
+   * Method called by NetworkServer to inform the Scheduler of a newly arrived
+   * uplink packet. This function schedules the OnReceiveWindowOpportunity
+   * events 1 and 2 seconds later.
+   */
+  void OnReceivedPacket (Ptr<const Packet> packet);
 
-    /**
-     * Method that is scheduled after packet arrivals in order to act on
-     * receive windows 1 and 2 seconds later receptions.
-     */
-    void OnReceiveWindowOpportunity(LoraDeviceAddress deviceAddress, int window);
+  /**
+   * Method that is scheduled after packet arrivals in order to act on
+   * receive windows 1 and 2 seconds later receptions.
+   */
+  void OnReceiveWindowOpportunity (LoraDeviceAddress deviceAddress, int window);
 
-  private:
-    TracedCallback<Ptr<const Packet>> m_receiveWindowOpened;
-    Ptr<NetworkStatus> m_status;
-    Ptr<NetworkController> m_controller;
+  /**
+   * Send data to the end device in the specified recieve window
+   */
+  void DoSend(Ptr<Packet> data, LoraDeviceAddress deviceAddress, int window);
+
+private:
+  TracedCallback<Ptr<const Packet> > m_receiveWindowOpened;
+  Ptr<NetworkStatus> m_status;
+  Ptr<NetworkController> m_controller;
 };
 
-} // namespace lorawan
+} /* namespace ns3 */
 
-} // namespace ns3
+}
 #endif /* NETWORK_SCHEDULER_H */
