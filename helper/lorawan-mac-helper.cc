@@ -20,774 +20,182 @@
  * Modified by: icsa-hua <info_icsa@hua.gr>
  */
 
-#include "ns3/lorawan-mac-helper.h"
-#include "ns3/gateway-lora-phy.h"
-#include "ns3/end-device-lora-phy.h"
-#include "ns3/lora-net-device.h"
-#include "ns3/log.h"
+#ifndef LORAWAN_MAC_HELPER_H
+#define LORAWAN_MAC_HELPER_H
+
+#include "ns3/net-device.h"
+#include "ns3/lora-channel.h"
+#include "ns3/lora-phy.h"
+#include "ns3/lorawan-mac.h"
+#include "ns3/class-a-end-device-lorawan-mac.h"
+#include "ns3/class-c-end-device-lorawan-mac.h"
+#include "ns3/lora-device-address-generator.h"
+#include "ns3/gateway-lorawan-mac.h"
+#include "ns3/node-container.h"
 #include "ns3/random-variable-stream.h"
 
 namespace ns3 {
 namespace lorawan {
 
-NS_LOG_COMPONENT_DEFINE ("LorawanMacHelper");
-
-LorawanMacHelper::LorawanMacHelper () : m_region (LorawanMacHelper::EU), m_dutyCycle (0.01)
+class LorawanMacHelper
 {
-}
-
-void
-LorawanMacHelper::Set (std::string name, const AttributeValue &v)
-{
-  m_mac.Set (name, v);
-}
-
-void
-LorawanMacHelper::SetDeviceType (enum DeviceType dt)
-{
-  NS_LOG_FUNCTION (this << dt);
-  switch (dt)
-    {
-    case GW:
-      m_mac.SetTypeId ("ns3::GatewayLorawanMac");
-      break;
-    case ED_A:
-      m_mac.SetTypeId ("ns3::ClassAEndDeviceLorawanMac");
-      break;
-    case ED_C:
-      m_mac.SetTypeId ("ns3::ClassCEndDeviceLorawanMac");
-      break;
-    }
-  m_deviceType = dt;
-}
-
-void
-LorawanMacHelper::SetAddressGenerator (Ptr<LoraDeviceAddressGenerator> addrGen)
-{
-  NS_LOG_FUNCTION (this);
-
-  m_addrGen = addrGen;
-}
-
-void
-LorawanMacHelper::SetRegion (enum LorawanMacHelper::Regions region)
-{
-  m_region = region;
-}
-
-// qiuyukang add 2019.12.07
-void
-LorawanMacHelper::SetDutyCycle (double dutyCycle)
-{
-  if (dutyCycle > 0.0 && dutyCycle <= 1.0)
-    {
-      m_dutyCycle = dutyCycle;
-    }
-  else
-    {
-      NS_LOG_WARN ("SetDutyCycle error! Duty cycle must be a double between 0 and 1.");
-    }
-}
-
-Ptr<LorawanMac>
-LorawanMacHelper::Create (Ptr<Node> node, Ptr<NetDevice> device) const
-{
-  Ptr<LorawanMac> mac = m_mac.Create<LorawanMac> ();
-  mac->SetDevice (device);
-
-  // If we are operating on an end device, add an address to it
-  if (m_deviceType == ED_A && m_addrGen != 0)
-    {
-      mac->GetObject<ClassAEndDeviceLorawanMac> ()->SetDeviceAddress (m_addrGen->NextAddress ());
-    }
-  else if (m_deviceType == ED_C && m_addrGen != 0)
-    {
-      mac->GetObject<ClassCEndDeviceLorawanMac> ()->SetDeviceAddress (m_addrGen->NextAddress ());
-    }
-
-  // Add a basic list of channels based on the region where the device is
-  // operating
-  if (m_deviceType == ED_A)
-    {
-      Ptr<ClassAEndDeviceLorawanMac> edMac = mac->GetObject<ClassAEndDeviceLorawanMac> ();
-      switch (m_region)
-        {
-          case LorawanMacHelper::EU: {
-            ConfigureForEuRegion (edMac);
-            break;
-          }
-          case LorawanMacHelper::SingleChannel: {
-            ConfigureForSingleChannelRegion (edMac);
-            break;
-          }
-          case LorawanMacHelper::ALOHA: {
-            ConfigureForAlohaRegion (edMac);
-            break;
-          }
-          default: {
-            NS_LOG_ERROR ("This region isn't supported yet!");
-            break;
-          }
-        }
-    }
-  else if (m_deviceType == ED_C)
-    {
-      Ptr<ClassCEndDeviceLorawanMac> edMac = mac->GetObject<ClassCEndDeviceLorawanMac> ();
-      switch (m_region)
-        {
-        case LorawanMacHelper::EU:
-          {
-            ConfigureForEuRegion (edMac);
-            break;
-          }
-        case LorawanMacHelper::ALOHA:
-          {
-            ConfigureForAlohaRegion (edMac);
-            break;
-          }
-        default:
-          {
-            NS_LOG_ERROR ("This region isn't supported yet!");
-            break;
-          }
-        }
-    }
-  else
-    {
-      Ptr<GatewayLorawanMac> gwMac = mac->GetObject<GatewayLorawanMac> ();
-      switch (m_region)
-        {
-          case LorawanMacHelper::EU: {
-            ConfigureForEuRegion (gwMac);
-            break;
-          }
-          case LorawanMacHelper::SingleChannel: {
-            ConfigureForSingleChannelRegion (gwMac);
-            break;
-          }
-          case LorawanMacHelper::ALOHA: {
-            ConfigureForAlohaRegion (gwMac);
-            break;
-          }
-          default: {
-            NS_LOG_ERROR ("This region isn't supported yet!");
-            break;
-          }
-        }
-    }
-  return mac;
-}
-
-void
-LorawanMacHelper::ConfigureForAlohaRegion (Ptr<ClassAEndDeviceLorawanMac> edMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ApplyCommonAlohaConfigurations (edMac);
-
-  /////////////////////////////////////////////////////
-  // TxPower -> Transmission power in dBm conversion //
-  /////////////////////////////////////////////////////
-  edMac->SetTxDbmForTxPower (std::vector<double>{16, 14, 12, 10, 8, 6, 4, 2});
-
-  ////////////////////////////////////////////////////////////
-  // Matrix to know which DataRate the GW will respond with //
-  ////////////////////////////////////////////////////////////
-  LorawanMac::ReplyDataRateMatrix matrix = {{{{0, 0, 0, 0, 0, 0}},
-                                             {{1, 0, 0, 0, 0, 0}},
-                                             {{2, 1, 0, 0, 0, 0}},
-                                             {{3, 2, 1, 0, 0, 0}},
-                                             {{4, 3, 2, 1, 0, 0}},
-                                             {{5, 4, 3, 2, 1, 0}},
-                                             {{6, 5, 4, 3, 2, 1}},
-                                             {{7, 6, 5, 4, 3, 2}}}};
-  edMac->SetReplyDataRateMatrix (matrix);
-
-  /////////////////////
-  // Preamble length //
-  /////////////////////
-  edMac->SetNPreambleSymbols (8);
-
-  //////////////////////////////////////
-  // Second receive window parameters //
-  //////////////////////////////////////
-  edMac->SetSecondReceiveWindowDataRate (0);
-  edMac->SetSecondReceiveWindowFrequency (869.525);
-}
-
-void
-LorawanMacHelper::ConfigureForAlohaRegion (Ptr<ClassCEndDeviceLorawanMac> edMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ApplyCommonAlohaConfigurations (edMac);
-
-  /////////////////////////////////////////////////////
-  // TxPower -> Transmission power in dBm conversion //
-  /////////////////////////////////////////////////////
-  edMac->SetTxDbmForTxPower (std::vector<double>{16, 14, 12, 10, 8, 6, 4, 2});
-
-  ////////////////////////////////////////////////////////////
-  // Matrix to know which DataRate the GW will respond with //
-  ////////////////////////////////////////////////////////////
-  LorawanMac::ReplyDataRateMatrix matrix = {{{{0, 0, 0, 0, 0, 0}},
-                                             {{1, 0, 0, 0, 0, 0}},
-                                             {{2, 1, 0, 0, 0, 0}},
-                                             {{3, 2, 1, 0, 0, 0}},
-                                             {{4, 3, 2, 1, 0, 0}},
-                                             {{5, 4, 3, 2, 1, 0}},
-                                             {{6, 5, 4, 3, 2, 1}},
-                                             {{7, 6, 5, 4, 3, 2}}}};
-  edMac->SetReplyDataRateMatrix (matrix);
-
-  /////////////////////
-  // Preamble length //
-  /////////////////////
-  edMac->SetNPreambleSymbols (8);
-
-  //////////////////////////////////////
-  // Second receive window parameters //
-  //////////////////////////////////////
-  edMac->SetSecondReceiveWindowDataRate (0);
-  edMac->SetSecondReceiveWindowFrequency (869.525);
-}
-
-void
-LorawanMacHelper::ConfigureForAlohaRegion (Ptr<GatewayLorawanMac> gwMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ///////////////////////////////
-  // ReceivePath configuration //
-  ///////////////////////////////
-  Ptr<GatewayLoraPhy> gwPhy =
-      gwMac->GetDevice ()->GetObject<LoraNetDevice> ()->GetPhy ()->GetObject<GatewayLoraPhy> ();
-
-  ApplyCommonAlohaConfigurations (gwMac);
-
-  if (gwPhy) // If cast is successful, there's a GatewayLoraPhy
-    {
-      NS_LOG_DEBUG ("Resetting reception paths");
-      gwPhy->ResetReceptionPaths ();
-
-      int receptionPaths = 0;
-      int maxReceptionPaths = 1;
-      while (receptionPaths < maxReceptionPaths)
-        {
-          gwPhy->GetObject<GatewayLoraPhy> ()->AddReceptionPath ();
-          receptionPaths++;
-        }
-      gwPhy->AddFrequency (868.1);
-    }
-}
-
-void
-LorawanMacHelper::ApplyCommonAlohaConfigurations (Ptr<LorawanMac> lorawanMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  //////////////
-  // SubBands //
-  //////////////
-
-  LogicalLoraChannelHelper channelHelper;
-  channelHelper.AddSubBand (868, 868.6, 1, 14);
-
-  //////////////////////
-  // Default channels //
-  //////////////////////
-  Ptr<LogicalLoraChannel> lc1 = CreateObject<LogicalLoraChannel> (868.1, 0, 5);
-  channelHelper.AddChannel (lc1);
-
-  lorawanMac->SetLogicalLoraChannelHelper (channelHelper);
-
-  ///////////////////////////////////////////////
-  // DataRate -> SF, DataRate -> Bandwidth     //
-  // and DataRate -> MaxAppPayload conversions //
-  ///////////////////////////////////////////////
-  lorawanMac->SetSfForDataRate (std::vector<uint8_t>{12, 11, 10, 9, 8, 7, 7});
-  lorawanMac->SetBandwidthForDataRate (
-      std::vector<double>{125000, 125000, 125000, 125000, 125000, 125000, 250000});
-  lorawanMac->SetMaxAppPayloadForDataRate (
-      std::vector<uint32_t>{59, 59, 59, 123, 230, 230, 230, 230});
-}
-
-void
-LorawanMacHelper::ConfigureForEuRegion (Ptr<ClassAEndDeviceLorawanMac> edMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ApplyCommonEuConfigurations (edMac);
-
-  /////////////////////////////////////////////////////
-  // TxPower -> Transmission power in dBm conversion //
-  /////////////////////////////////////////////////////
-  edMac->SetTxDbmForTxPower (std::vector<double>{16, 14, 12, 10, 8, 6, 4, 2});
-
-  ////////////////////////////////////////////////////////////
-  // Matrix to know which DataRate the GW will respond with //
-  ////////////////////////////////////////////////////////////
-  LorawanMac::ReplyDataRateMatrix matrix = {{{{0, 0, 0, 0, 0, 0}},
-                                             {{1, 0, 0, 0, 0, 0}},
-                                             {{2, 1, 0, 0, 0, 0}},
-                                             {{3, 2, 1, 0, 0, 0}},
-                                             {{4, 3, 2, 1, 0, 0}},
-                                             {{5, 4, 3, 2, 1, 0}},
-                                             {{6, 5, 4, 3, 2, 1}},
-                                             {{7, 6, 5, 4, 3, 2}}}};
-  edMac->SetReplyDataRateMatrix (matrix);
-
-  /////////////////////
-  // Preamble length //
-  /////////////////////
-  edMac->SetNPreambleSymbols (8);
-
-  //////////////////////////////////////
-  // Second receive window parameters //
-  //////////////////////////////////////
-  edMac->SetSecondReceiveWindowDataRate (0);
-  edMac->SetSecondReceiveWindowFrequency (869.525);
-}
-
-void
-LorawanMacHelper::ConfigureForEuRegion (Ptr<ClassCEndDeviceLorawanMac> edMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ApplyCommonEuConfigurations (edMac);
-
-  /////////////////////////////////////////////////////
-  // TxPower -> Transmission power in dBm conversion //
-  /////////////////////////////////////////////////////
-  edMac->SetTxDbmForTxPower (std::vector<double>{16, 14, 12, 10, 8, 6, 4, 2});
-
-  ////////////////////////////////////////////////////////////
-  // Matrix to know which DataRate the GW will respond with //
-  ////////////////////////////////////////////////////////////
-  LorawanMac::ReplyDataRateMatrix matrix = {{{{0, 0, 0, 0, 0, 0}},
-                                             {{1, 0, 0, 0, 0, 0}},
-                                             {{2, 1, 0, 0, 0, 0}},
-                                             {{3, 2, 1, 0, 0, 0}},
-                                             {{4, 3, 2, 1, 0, 0}},
-                                             {{5, 4, 3, 2, 1, 0}},
-                                             {{6, 5, 4, 3, 2, 1}},
-                                             {{7, 6, 5, 4, 3, 2}}}};
-  edMac->SetReplyDataRateMatrix (matrix);
-
-  /////////////////////
-  // Preamble length //
-  /////////////////////
-  edMac->SetNPreambleSymbols (8);
-
-  //////////////////////////////////////
-  // Second receive window parameters //
-  //////////////////////////////////////
-  edMac->SetSecondReceiveWindowDataRate (0);
-  edMac->SetSecondReceiveWindowFrequency (869.525);
-}
-
-void
-LorawanMacHelper::ConfigureForEuRegion (Ptr<GatewayLorawanMac> gwMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ///////////////////////////////
-  // ReceivePath configuration //
-  ///////////////////////////////
-  Ptr<GatewayLoraPhy> gwPhy =
-      gwMac->GetDevice ()->GetObject<LoraNetDevice> ()->GetPhy ()->GetObject<GatewayLoraPhy> ();
-
-  ApplyCommonEuConfigurations (gwMac);
-
-  if (gwPhy) // If cast is successful, there's a GatewayLoraPhy
-    {
-      NS_LOG_DEBUG ("Resetting reception paths");
-      gwPhy->ResetReceptionPaths ();
-
-      std::vector<double> frequencies;
-      frequencies.push_back (868.1);
-      frequencies.push_back (868.3);
-      frequencies.push_back (868.5);
-
-      for (auto &f : frequencies)
-        {
-          gwPhy->AddFrequency (f);
-        }
-
-      int receptionPaths = 0;
-      int maxReceptionPaths = 8;
-      while (receptionPaths < maxReceptionPaths)
-        {
-          gwPhy->GetObject<GatewayLoraPhy> ()->AddReceptionPath ();
-          receptionPaths++;
-        }
-    }
-}
-
-void
-LorawanMacHelper::ApplyCommonEuConfigurations (Ptr<LorawanMac> lorawanMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  //////////////
-  // SubBands //
-  //////////////
-
-  LogicalLoraChannelHelper channelHelper;
-  channelHelper.AddSubBand (868, 868.6, 0.01, 14); //WITHTHESE THE SYSTEM WORKS FINE 
-  channelHelper.AddSubBand (868.7, 869.2, 0.001, 14);
-  channelHelper.AddSubBand (869.4, 869.65, 0.1, 27);
-  //THE 14 HERE IS THE Effective Radiated Power  (ERP); 
-  //channelHelper.AddSubBand (868, 868.6, m_dutyCycle, 14);
-  //channelHelper.AddSubBand (868.7, 869.2, m_dutyCycle, 14);
-  //channelHelper.AddSubBand (869.4, 869.65, m_dutyCycle, 27);
-
-  //////////////////////
-  // Default channels //
-  //////////////////////
-  Ptr<LogicalLoraChannel> lc1 = CreateObject<LogicalLoraChannel> (868.1, 0, 5);
-  Ptr<LogicalLoraChannel> lc2 = CreateObject<LogicalLoraChannel> (868.3, 0, 5);
-  Ptr<LogicalLoraChannel> lc3 = CreateObject<LogicalLoraChannel> (868.5, 0, 5);
-  channelHelper.AddChannel (lc1);
-  channelHelper.AddChannel (lc2);
-  channelHelper.AddChannel (lc3);
-
-  lorawanMac->SetLogicalLoraChannelHelper (channelHelper);
-
-  ///////////////////////////////////////////////
-  // DataRate -> SF, DataRate -> Bandwidth     //
-  // and DataRate -> MaxAppPayload conversions //
-  ///////////////////////////////////////////////
-  lorawanMac->SetSfForDataRate (std::vector<uint8_t>{12, 11, 10, 9, 8, 7, 7});
-  lorawanMac->SetBandwidthForDataRate (
-      std::vector<double>{125000, 125000, 125000, 125000, 125000, 125000, 250000});
-  lorawanMac->SetMaxAppPayloadForDataRate (
-      std::vector<uint32_t>{59, 59, 59, 123, 230, 230, 230, 230});
-}
-
-///////////////////////////////
-
-void
-LorawanMacHelper::ConfigureForSingleChannelRegion (Ptr<ClassAEndDeviceLorawanMac> edMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ApplyCommonSingleChannelConfigurations (edMac);
-
-  /////////////////////////////////////////////////////
-  // TxPower -> Transmission power in dBm conversion //
-  /////////////////////////////////////////////////////
-  edMac->SetTxDbmForTxPower (std::vector<double>{16, 14, 12, 10, 8, 6, 4, 2});
-
-  ////////////////////////////////////////////////////////////
-  // Matrix to know which DataRate the GW will respond with //
-  ////////////////////////////////////////////////////////////
-  LorawanMac::ReplyDataRateMatrix matrix = {{{{0, 0, 0, 0, 0, 0}},
-                                             {{1, 0, 0, 0, 0, 0}},
-                                             {{2, 1, 0, 0, 0, 0}},
-                                             {{3, 2, 1, 0, 0, 0}},
-                                             {{4, 3, 2, 1, 0, 0}},
-                                             {{5, 4, 3, 2, 1, 0}},
-                                             {{6, 5, 4, 3, 2, 1}},
-                                             {{7, 6, 5, 4, 3, 2}}}};
-  edMac->SetReplyDataRateMatrix (matrix);
-
-  /////////////////////
-  // Preamble length //
-  /////////////////////
-  edMac->SetNPreambleSymbols (8);
-
-  //////////////////////////////////////
-  // Second receive window parameters //
-  //////////////////////////////////////
-  edMac->SetSecondReceiveWindowDataRate (0);
-  edMac->SetSecondReceiveWindowFrequency (869.525);
-}
-
-void
-LorawanMacHelper::ConfigureForSingleChannelRegion (Ptr<GatewayLorawanMac> gwMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  ///////////////////////////////
-  // ReceivePath configuration //
-  ///////////////////////////////
-  Ptr<GatewayLoraPhy> gwPhy =
-      gwMac->GetDevice ()->GetObject<LoraNetDevice> ()->GetPhy ()->GetObject<GatewayLoraPhy> ();
-
-  ApplyCommonEuConfigurations (gwMac);
-
-  if (gwPhy) // If cast is successful, there's a GatewayLoraPhy
-    {
-      NS_LOG_DEBUG ("Resetting reception paths");
-      gwPhy->ResetReceptionPaths ();
-
-      std::vector<double> frequencies;
-      frequencies.push_back (868.1);
-
-      for (auto &f : frequencies)
-        {
-          gwPhy->AddFrequency (f);
-        }
-
-      int receptionPaths = 0;
-      int maxReceptionPaths = 8;
-      while (receptionPaths < maxReceptionPaths)
-        {
-          gwPhy->GetObject<GatewayLoraPhy> ()->AddReceptionPath ();
-          receptionPaths++;
-        }
-    }
-}
-
-void
-LorawanMacHelper::ApplyCommonSingleChannelConfigurations (Ptr<LorawanMac> lorawanMac) const
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  //////////////
-  // SubBands //
-  //////////////
-
-  LogicalLoraChannelHelper channelHelper;
-  channelHelper.AddSubBand (868, 868.6, 0.01, 14);
-  channelHelper.AddSubBand (868.7, 869.2, 0.001, 14);
-  channelHelper.AddSubBand (869.4, 869.65, 0.1, 27);
-
-  //////////////////////
-  // Default channels //
-  //////////////////////
-  Ptr<LogicalLoraChannel> lc1 = CreateObject<LogicalLoraChannel> (868.1, 0, 5);
-  channelHelper.AddChannel (lc1);
-
-  lorawanMac->SetLogicalLoraChannelHelper (channelHelper);
-
-  ///////////////////////////////////////////////
-  // DataRate -> SF, DataRate -> Bandwidth     //
-  // and DataRate -> MaxAppPayload conversions //
-  ///////////////////////////////////////////////
-  lorawanMac->SetSfForDataRate (std::vector<uint8_t>{12, 11, 10, 9, 8, 7, 7});
-  lorawanMac->SetBandwidthForDataRate (
-      std::vector<double>{125000, 125000, 125000, 125000, 125000, 125000, 250000});
-  lorawanMac->SetMaxAppPayloadForDataRate (
-      std::vector<uint32_t>{59, 59, 59, 123, 230, 230, 230, 230});
-}
-
-std::vector<int>
-LorawanMacHelper::SetSpreadingFactorsUp (NodeContainer endDevices, NodeContainer gateways,
-                                         Ptr<LoraChannel> channel)
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  std::vector<int> sfQuantity (7, 0);
-  for (NodeContainer::Iterator j = endDevices.Begin (); j != endDevices.End (); ++j)
-    {
-      Ptr<Node> object = *j;
-      Ptr<MobilityModel> position = object->GetObject<MobilityModel> ();
-      NS_ASSERT (position != 0);
-      Ptr<NetDevice> netDevice = object->GetDevice (0);
-      Ptr<LoraNetDevice> loraNetDevice = netDevice->GetObject<LoraNetDevice> ();
-      NS_ASSERT (loraNetDevice != 0);
-      Ptr<EndDeviceLorawanMac> mac = loraNetDevice->GetMac ()->GetObject<EndDeviceLorawanMac> ();
-      NS_ASSERT (mac != 0);
-
-      // Try computing the distance from each gateway and find the best one
-      Ptr<Node> bestGateway = gateways.Get (0);
-      Ptr<MobilityModel> bestGatewayPosition = bestGateway->GetObject<MobilityModel> ();
-
-      // Assume devices transmit at 14 dBm
-      double highestRxPower = channel->GetRxPower (14, position, bestGatewayPosition);
-
-      for (NodeContainer::Iterator currentGw = gateways.Begin () + 1; currentGw != gateways.End ();
-           ++currentGw)
-        {
-          // Compute the power received from the current gateway
-          Ptr<Node> curr = *currentGw;
-          Ptr<MobilityModel> currPosition = curr->GetObject<MobilityModel> ();
-          double currentRxPower = channel->GetRxPower (14, position, currPosition); // dBm
-
-          if (currentRxPower > highestRxPower)
-            {
-              bestGateway = curr;
-              bestGatewayPosition = curr->GetObject<MobilityModel> ();
-              highestRxPower = currentRxPower;
-            }
-        }
-
-      // NS_LOG_DEBUG ("Rx Power: " << highestRxPower);
-      double rxPower = highestRxPower;
-
-      // Get the ED sensitivity
-      Ptr<EndDeviceLoraPhy> edPhy = loraNetDevice->GetPhy ()->GetObject<EndDeviceLoraPhy> ();
-      const double *edSensitivity = edPhy->sensitivity;
-
-      if (rxPower > *edSensitivity)
-        {
-          mac->SetDataRate (5);
-          sfQuantity[0] = sfQuantity[0] + 1;
-        }
-      else if (rxPower > *(edSensitivity + 1))
-        {
-          mac->SetDataRate (4);
-          sfQuantity[1] = sfQuantity[1] + 1;
-        }
-      else if (rxPower > *(edSensitivity + 2))
-        {
-          mac->SetDataRate (3);
-          sfQuantity[2] = sfQuantity[2] + 1;
-        }
-      else if (rxPower > *(edSensitivity + 3))
-        {
-          mac->SetDataRate (2);
-          sfQuantity[3] = sfQuantity[3] + 1;
-        }
-      else if (rxPower > *(edSensitivity + 4))
-        {
-          mac->SetDataRate (1);
-          sfQuantity[4] = sfQuantity[4] + 1;
-        }
-      else if (rxPower > *(edSensitivity + 5))
-        {
-          mac->SetDataRate (0);
-          sfQuantity[5] = sfQuantity[5] + 1;
-        }
-      else // Device is out of range. Assign SF12.
-        {
-          // NS_LOG_DEBUG ("Device out of range");
-          mac->SetDataRate (0);
-          sfQuantity[6] = sfQuantity[6] + 1;
-          // NS_LOG_DEBUG ("sfQuantity[6] = " << sfQuantity[6]);
-        }
-
-      /*
-
-      // Get the Gw sensitivity
-      Ptr<NetDevice> gatewayNetDevice = bestGateway->GetDevice (0);
-      Ptr<LoraNetDevice> gatewayLoraNetDevice = gatewayNetDevice->GetObject<LoraNetDevice> ();
-      Ptr<GatewayLoraPhy> gatewayPhy = gatewayLoraNetDevice->GetPhy ()->GetObject<GatewayLoraPhy> ();
-      const double *gwSensitivity = gatewayPhy->sensitivity;
-
-      if(rxPower > *gwSensitivity)
-        {
-          mac->SetDataRate (5);
-          sfQuantity[0] = sfQuantity[0] + 1;
-
-        }
-      else if (rxPower > *(gwSensitivity+1))
-        {
-          mac->SetDataRate (4);
-          sfQuantity[1] = sfQuantity[1] + 1;
-
-        }
-      else if (rxPower > *(gwSensitivity+2))
-        {
-          mac->SetDataRate (3);
-          sfQuantity[2] = sfQuantity[2] + 1;
-
-        }
-      else if (rxPower > *(gwSensitivity+3))
-        {
-          mac->SetDataRate (2);
-          sfQuantity[3] = sfQuantity[3] + 1;
-        }
-      else if (rxPower > *(gwSensitivity+4))
-        {
-          mac->SetDataRate (1);
-          sfQuantity[4] = sfQuantity[4] + 1;
-        }
-      else if (rxPower > *(gwSensitivity+5))
-        {
-          mac->SetDataRate (0);
-          sfQuantity[5] = sfQuantity[5] + 1;
-
-        }
-      else // Device is out of range. Assign SF12.
-        {
-          mac->SetDataRate (0);
-          sfQuantity[6] = sfQuantity[6] + 1;
-
-        }
-        */
-
-    } // end loop on nodes
-
-  return sfQuantity;
-
-} //  end function
-
-std::vector<int>
-LorawanMacHelper::SetSpreadingFactorsGivenDistribution (NodeContainer endDevices,
-                                                        NodeContainer gateways,
-                                                        std::vector<double> distribution)
-{
-  NS_LOG_FUNCTION_NOARGS ();
-
-  std::vector<int> sfQuantity (7, 0);
-  Ptr<UniformRandomVariable> uniformRV = CreateObject<UniformRandomVariable> ();
-  std::vector<double> cumdistr (6);
-  cumdistr[0] = distribution[0];
-  for (int i = 1; i < 7; ++i)
-    {
-      cumdistr[i] = distribution[i] + cumdistr[i - 1];
-    }
-
-  NS_LOG_DEBUG ("Distribution: " << distribution[0] << " " << distribution[1] << " "
-                                 << distribution[2] << " " << distribution[3] << " "
-                                 << distribution[4] << " " << distribution[5]);
-  NS_LOG_DEBUG ("Cumulative distribution: " << cumdistr[0] << " " << cumdistr[1] << " "
-                                            << cumdistr[2] << " " << cumdistr[3] << " "
-                                            << cumdistr[4] << " " << cumdistr[5]);
-
-  for (NodeContainer::Iterator j = endDevices.Begin (); j != endDevices.End (); ++j)
-    {
-      Ptr<Node> object = *j;
-      Ptr<MobilityModel> position = object->GetObject<MobilityModel> ();
-      NS_ASSERT (position != 0);
-      Ptr<NetDevice> netDevice = object->GetDevice (0);
-      Ptr<LoraNetDevice> loraNetDevice = netDevice->GetObject<LoraNetDevice> ();
-      NS_ASSERT (loraNetDevice != 0);
-      Ptr<EndDeviceLorawanMac> mac = loraNetDevice->GetMac ()->GetObject<EndDeviceLorawanMac> ();
-      NS_ASSERT (mac != 0);
-
-      double prob = uniformRV->GetValue (0, 1);
-
-      // NS_LOG_DEBUG ("Probability: " << prob);
-      if (prob < cumdistr[0])
-        {
-          mac->SetDataRate (5);
-          sfQuantity[0] = sfQuantity[0] + 1;
-        }
-      else if (prob > cumdistr[0] && prob < cumdistr[1])
-        {
-          mac->SetDataRate (4);
-          sfQuantity[1] = sfQuantity[1] + 1;
-        }
-      else if (prob > cumdistr[1] && prob < cumdistr[2])
-        {
-          mac->SetDataRate (3);
-          sfQuantity[2] = sfQuantity[2] + 1;
-        }
-      else if (prob > cumdistr[2] && prob < cumdistr[3])
-        {
-          mac->SetDataRate (2);
-          sfQuantity[3] = sfQuantity[3] + 1;
-        }
-      else if (prob > cumdistr[3] && prob < cumdistr[4])
-        {
-          mac->SetDataRate (1);
-          sfQuantity[4] = sfQuantity[4] + 1;
-        }
-      else
-        {
-          mac->SetDataRate (0);
-          sfQuantity[5] = sfQuantity[5] + 1;
-        }
-
-    } // end loop on nodes
-
-  return sfQuantity;
-
-} //  end function
+public:
+  /**
+   * Define the kind of device. Can be either GW (Gateway) or ED (End Device).
+   */
+  enum DeviceType { GW, ED_A, ED_C };
+
+  /**
+   * Define the operational region.
+   */
+  enum Regions {
+    EU,
+    US,
+    China,
+    EU433MHz,
+    Australia,
+    CN,
+    AS923MHz,
+    SouthKorea,
+    SingleChannel,
+    ALOHA
+  };
+
+  /**
+   * Create a mac helper without any parameter set. The user must set
+   * them all to be able to call Install later.
+   */
+  LorawanMacHelper ();
+
+  /**
+   * Set an attribute of the underlying MAC object.
+   *
+   * \param name the name of the attribute to set.
+   * \param v the value of the attribute.
+   */
+  void Set (std::string name, const AttributeValue &v);
+
+  /**
+   * Set the address generator to use for creation of these nodes.
+   */
+  void SetAddressGenerator (Ptr<LoraDeviceAddressGenerator> addrGen);
+
+  /**
+   * Set the kind of MAC this helper will create.
+   *
+   * \param dt the device type (either gateway or end device).
+   */
+  void SetDeviceType (enum DeviceType dt);
+
+  /**
+   * Set the region in which the device is to operate.
+   */
+  void SetRegion (enum Regions region);
+
+  /**
+   * qiuyukang add 2019.12.07
+   * Set the duty cycle of EU region.
+   * 
+   * \param dutyCycle the duty cycle limitation(0.0~1.0, default 0.01 for EU region). 
+   */
+  void SetDutyCycle(double dutyCycle);
+
+  /**
+   * Create the LorawanMac instance and connect it to a device
+   *
+   * \param node the node on which we wish to create a wifi MAC.
+   * \param device the device within which this MAC will be created.
+   * \returns a newly-created LorawanMac object.
+   */
+  Ptr<LorawanMac> Create (Ptr<Node> node, Ptr<NetDevice> device) const;
+
+  /**
+   * Set up the end device's data rates
+   * This function assumes we are using the following convention:
+   * SF7 -> DR5
+   * SF8 -> DR4
+   * SF9 -> DR3
+   * SF10 -> DR2
+   * SF11 -> DR1
+   * SF12 -> DR0
+   */
+  static std::vector<int> SetSpreadingFactorsUp (NodeContainer endDevices, NodeContainer gateways,
+                                                 Ptr<LoraChannel> channel);
+  /**
+   * Set up the end device's data rates according to the given distribution.
+   */
+  static std::vector<int> SetSpreadingFactorsGivenDistribution (NodeContainer endDevices,
+                                                                NodeContainer gateways,
+                                                                std::vector<double> distribution);
+
+private:
+  /**
+   * Perform region-specific configurations for the 868 MHz EU band.
+   */
+  void ConfigureForEuRegion (Ptr<ClassAEndDeviceLorawanMac> edMac) const;
+
+  /**
+   * Perform region-specific configurations for the 868 MHz EU band.
+   */
+  void ConfigureForEuRegion (Ptr<ClassCEndDeviceLorawanMac> edMac) const;
+
+  /**
+   * Perform region-specific configurations for the 868 MHz EU band.
+   */
+  void ConfigureForEuRegion (Ptr<GatewayLorawanMac> gwMac) const;
+
+  /**
+   * Apply configurations that are common both for the GatewayLorawanMac and the
+   * ClassAEndDeviceLorawanMac classes.
+   */
+  void ApplyCommonEuConfigurations (Ptr<LorawanMac> lorawanMac) const;
+
+  /**
+   * Perform region-specific configurations for the SINGLECHANNEL band.
+   */
+  void ConfigureForSingleChannelRegion (Ptr<ClassAEndDeviceLorawanMac> edMac) const;
+
+  /**
+   * Perform region-specific configurations for the SINGLECHANNEL band.
+   */
+  void ConfigureForSingleChannelRegion (Ptr<GatewayLorawanMac> gwMac) const;
+
+  /**
+   * Apply configurations that are common both for the GatewayLorawanMac and the
+   * ClassAEndDeviceLorawanMac classes.
+   */
+  void ApplyCommonSingleChannelConfigurations (Ptr<LorawanMac> lorawanMac) const;
+
+  /**
+   * Perform region-specific configurations for the ALOHA band.
+   */
+  void ConfigureForAlohaRegion (Ptr<ClassAEndDeviceLorawanMac> edMac) const;
+
+  /**
+   * Perform region-specific configurations for the ALOHA band.
+   */
+  void ConfigureForAlohaRegion (Ptr<ClassCEndDeviceLorawanMac> edMac) const;
+
+  /**
+   * Perform region-specific configurations for the ALOHA band.
+   */
+  void ConfigureForAlohaRegion (Ptr<GatewayLorawanMac> gwMac) const;
+
+  /**
+   * Apply configurations that are common both for the GatewayLorawanMac and the
+   * ClassAEndDeviceLorawanMac classes.
+   */
+  void ApplyCommonAlohaConfigurations (Ptr<LorawanMac> lorawanMac) const;
+
+  ObjectFactory m_mac;
+  Ptr<LoraDeviceAddressGenerator> m_addrGen; //!< Pointer to the address generator to use
+  enum DeviceType m_deviceType; //!< The kind of device to install
+  enum Regions m_region; //!< The region in which the device will operate
+  // qiuyukang add 2019.12.07
+  double m_dutyCycle; //!< The dutyCycle limitation for EU region.
+};
 
 } // namespace lorawan
+
 } // namespace ns3
+#endif /* LORA_PHY_HELPER_H */
