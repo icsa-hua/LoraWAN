@@ -1726,7 +1726,7 @@ namespace ns3{
                     std::cout<<"Accepted Devices ==>" << Count_Acc_EDs.at(szi)<<std::endl; 
                     std::cout<<"Indangered Devices In Event ==> "<<get<0>(Regard_EM.at(szi))<<std::endl; 
                     std::cout<<"Actually Informed Devices ==> " << get<1>(Regard_EM.at(szi))<<std::endl;
-                    std::cout<<"Total Number of Endangered Devices in Simulation ==> " << Count_Endangered.at(szi)<<std::endl;
+                    //std::cout<<"Total Number of Endangered Devices in Simulation ==> " << Count_Endangered.at(szi)<<std::endl;
                 }
             }
             
