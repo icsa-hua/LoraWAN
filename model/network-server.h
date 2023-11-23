@@ -1,3 +1,4 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2018 University of Padova
  *
@@ -16,30 +17,29 @@
  *
  * Authors: Davide Magrin <magrinda@dei.unipd.it>
  *          Martina Capuzzo <capuzzom@dei.unipd.it>
+ * Modified by: QiuYukang <b612n@qq.com>
+ * Modified by: icsa-hua <info_icsa@hua.gr>
  */
 
 #ifndef NETWORK_SERVER_H
 #define NETWORK_SERVER_H
 
-#include "class-a-end-device-lorawan-mac.h"
-#include "gateway-status.h"
-#include "lora-device-address.h"
-#include "network-controller.h"
-#include "network-scheduler.h"
-#include "network-status.h"
-
-#include "ns3/application.h"
-#include "ns3/log.h"
-#include "ns3/net-device.h"
-#include "ns3/node-container.h"
 #include "ns3/object.h"
-#include "ns3/packet.h"
+#include "ns3/application.h"
+#include "ns3/net-device.h"
 #include "ns3/point-to-point-net-device.h"
+#include "ns3/packet.h"
+#include "ns3/lora-device-address.h"
+#include "ns3/gateway-status.h"
+#include "ns3/network-status.h"
+#include "ns3/network-scheduler.h"
+#include "ns3/network-controller.h"
+#include "ns3/node-container.h"
+#include "ns3/log.h"
+#include "ns3/class-a-end-device-lorawan-mac.h"
 
-namespace ns3
-{
-namespace lorawan
-{
+namespace ns3 {
+namespace lorawan {
 
 /**
  * The NetworkServer is an application standing on top of a node equipped with
@@ -50,65 +50,70 @@ namespace lorawan
  */
 class NetworkServer : public Application
 {
-  public:
-    static TypeId GetTypeId();
+public:
+  static TypeId GetTypeId (void);
 
-    NetworkServer();
-    ~NetworkServer() override;
+  NetworkServer ();
+  virtual ~NetworkServer ();
 
-    /**
-     * Start the NS application.
-     */
-    void StartApplication() override;
+  /**
+   * Start the NS application.
+   */
+  void StartApplication (void);
 
-    /**
-     * Stop the NS application.
-     */
-    void StopApplication() override;
+  /**
+   * Stop the NS application.
+   */
+  void StopApplication (void);
 
-    /**
-     * Inform the NetworkServer that these nodes are connected to the network.
-     *
-     * This method will create a DeviceStatus object for each new node, and add
-     * it to the list.
-     */
-    void AddNodes(NodeContainer nodes);
+  /**
+   * Inform the NetworkServer that these nodes are connected to the network.
+   *
+   * This method will create a DeviceStatus object for each new node, and add
+   * it to the list.
+   */
+  void AddNodes (NodeContainer nodes);
 
-    /**
-     * Inform the NetworkServer that this node is connected to the network.
-     * This method will create a DeviceStatus object for the new node (if it
-     * doesn't already exist).
-     */
-    void AddNode(Ptr<Node> node);
+  /**
+   * Inform the NetworkServer that this node is connected to the network.
+   * This method will create a DeviceStatus object for the new node (if it
+   * doesn't already exist).
+   */
+  void AddNode (Ptr<Node> node);
 
-    /**
-     * Add this gateway to the list of gateways connected to this NS.
-     * Each GW is identified by its Address in the NS-GWs network.
-     */
-    void AddGateway(Ptr<Node> gateway, Ptr<NetDevice> netDevice);
+  /**
+   * Add this gateway to the list of gateways connected to this NS.
+   * Each GW is identified by its Address in the NS-GWs network.
+   */
+  void AddGateway (Ptr<Node> gateway, Ptr<NetDevice> netDevice);
 
-    /**
-     * A NetworkControllerComponent to this NetworkServer instance.
-     */
-    void AddComponent(Ptr<NetworkControllerComponent> component);
+  /**
+   * A NetworkControllerComponent to this NetworkServer instance.
+   */
+  void AddComponent (Ptr<NetworkControllerComponent> component);
 
-    /**
-     * Receive a packet from a gateway.
-     * \param packet the received packet
-     */
-    bool Receive(Ptr<NetDevice> device,
-                 Ptr<const Packet> packet,
-                 uint16_t protocol,
-                 const Address& address);
+  /**
+   * Receive a packet from a gateway.
+   * \param packet the received packet
+   */
+  bool Receive (Ptr<NetDevice> device, Ptr<const Packet> packet, uint16_t protocol,
+                const Address &address);
 
-    Ptr<NetworkStatus> GetNetworkStatus();
+  /**
+   * Send a packet to a end device
+   * \param data payload in frame
+   * \param deviceAddress address of end device
+   */
+  void Send(Ptr<Packet> data, LoraDeviceAddress deviceAddress,int window);
 
-  protected:
-    Ptr<NetworkStatus> m_status;
-    Ptr<NetworkController> m_controller;
-    Ptr<NetworkScheduler> m_scheduler;
+  Ptr<NetworkStatus> GetNetworkStatus (void);
 
-    TracedCallback<Ptr<const Packet>> m_receivedPacket;
+protected:
+  Ptr<NetworkStatus> m_status;
+  Ptr<NetworkController> m_controller;
+  Ptr<NetworkScheduler> m_scheduler;
+
+  TracedCallback<Ptr<const Packet>> m_receivedPacket;
 };
 
 } // namespace lorawan
