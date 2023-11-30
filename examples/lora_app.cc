@@ -379,7 +379,8 @@ namespace ns3{
             }else if(ack_pos != lora_app->ACK_Devices.end()){
                 continue; 
             }
-            
+
+            //Distance coverage 
             if(distance < 1000.0){
                 (subsets[0]).insert((*edNode));
                 lora_app->applicable_nodes++; 
@@ -480,7 +481,7 @@ namespace ns3{
             return gwAddresses;
 
         }else {
-            //The message is a unicast transmission. TODO: Have the ns or the GW successfully send dedicated messages to the end devices. 
+            //The message is a unicast transmission. TODO: Have the ns successfully send dedicated messages to the end devices. 
             Ptr<EndDeviceStatus> edStatus = lora_app->m_endDeviceStatuses.at(address); 
             double replyFrequency; 
             if (window == 1){
@@ -595,13 +596,11 @@ namespace ns3{
         Ptr<NetworkStatus> net_status = lora_app->m_ns->GetNetworkStatus(); 
         std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> endDeviceStatuses = net_status->m_endDeviceStatuses;
         if(endDeviceStatuses.find(address)==endDeviceStatuses.end()){
-            //If device is not registered in the network
             /*********CHECKING FIRST RECEPTION TO GRANT ACCESS TO THE NETWORK**************/
             Bimap::right_const_iterator it = lora_app->m_createdNodes.right.find(address);
             auto add_pos = lora_app->m_endDeviceStatuses.find(address);
             if (add_pos != lora_app->m_endDeviceStatuses.end()  &&  it != lora_app->m_createdNodes.right.end()){
-                //If device has accepted an echo broadcast and it was just created in the network. 
-                /***********IF THE DEVICE HAS SENT ONCE && IT IS THE FIRST TIME WE ARE RECEIVING THEN ADD DEVICE TO NETWORK***********/
+                /***********IF device has accepted an echo broadcast and it was just created in the network***********/
                 Ptr<EndDeviceLorawanMac> tobeAdded = lora_app->m_endDeviceStatuses[address] -> GetMac();
                 lora_app->accepted_devices++;
                 lora_app->m_ns -> GetNetworkStatus() ->AddNode(tobeAdded);
@@ -679,36 +678,28 @@ namespace ns3{
         if(exl_node!=lora_app->excluded_nodes.end()){
             return; 
         }else if(lora_app->remainingNodes.find(cur_node) != lora_app->remainingNodes.end() && txAddress.IsBroadcast()){
-                        //If the node is pending for an ACK && broadcast message was received. 
+            //If the node is pending for an ACK && broadcast message was received. 
             //NS_LOG_DEBUG("Remaining Nodes -> " << lora_app->remainingNodes.size());
-            NS_LOG_DEBUG(cur_node);
             if(endDeviceStatuses.find(addr)!=endDeviceStatuses.end()){
-                NS_LOG_DEBUG("Zero");
                     //But device has sent a message. 
                 if(lora_app->EmergencyQueue.find(addr)!=lora_app->EmergencyQueue.end() && lora_app->event_occurred){
                     //If event has occured so emergency broadcast and device needs to hear the message 
-                    NS_LOG_DEBUG("First");
                     lora_app->ignore_broadcast_nodes.pop(); 
                     lora_app->ignore_broadcast_nodes.push(false); 
                 }
             }else if(!lora_app->event_occurred){
-                NS_LOG_DEBUG("Twelveth");
                 lora_app->vehicles_States[(addr)] = "RX_F";
                 lora_app->ignore_broadcast_nodes.pop(); 
                 lora_app->ignore_broadcast_nodes.push(false);
             }else if(lora_app->event_occurred){
-                NS_LOG_DEBUG("Thirteenth");
                 if(lora_app->EmergencyQueue.find(addr)!=lora_app->EmergencyQueue.end()){
-                    NS_LOG_DEBUG("Fourteenth");
                     lora_app->ignore_broadcast_nodes.pop(); 
                     lora_app->ignore_broadcast_nodes.push(false);
                 }
             }
         }else if(endDeviceStatuses.find(addr)!=endDeviceStatuses.end() && txAddress.IsBroadcast()){
-            NS_LOG_DEBUG("17th");
                 //If device has received ACK and is accepted to the network 
             if(lora_app->EmergencyQueue.find(addr)!=lora_app->EmergencyQueue.end() && lora_app->event_occurred){
-                NS_LOG_DEBUG("18th");
                 lora_app->ignore_broadcast_nodes.pop(); 
                 lora_app->ignore_broadcast_nodes.push(false); 
             }
@@ -830,10 +821,7 @@ namespace ns3{
     //--- Callback Function to handle the GW broadcast towards the end devices ---//
     void BroadcastGenerationCallback(Ptr<Packet> data, NodeContainer gateway, bool autonomousGW){
         NS_LOG_FUNCTION_NOARGS(); 
-
-        //Diference in these other than that in the first the GW alone decides to sent the echo packet ,is the waiting time. 
-        //In the first method the waiting time approaches values greater than 10s. However on the Second it is 0s. This is not what really happens. 
-        //Wait time is the same but the time which we call to get the wait time is different.  
+     
         if(!lora_app->ignore_broadcast_nodes.empty()){
             while(!lora_app->ignore_broadcast_nodes.empty()){
                 lora_app->ignore_broadcast_nodes.pop();
@@ -904,10 +892,8 @@ namespace ns3{
         Ptr<Node> cur_node = lora_app->m_vehicles.Get((iter));
         LoraDeviceAddress addr = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress(); 
         lora_app->phy_end_reception_count.pop(); 
-       // std::cout<<"Ignore broadcast must bethe problem ";
         bool answ = lora_app->ignore_broadcast_nodes.front();
         lora_app->ignore_broadcast_nodes.pop();
-       // std::cout<<"It is not?????!"<<std::endl;
 
         auto exl_node = std::find(lora_app->excluded_nodes.begin(), lora_app->excluded_nodes.end(),cur_node);
         if(exl_node!=lora_app->excluded_nodes.end()){
@@ -1734,7 +1720,6 @@ namespace ns3{
         }else{
             std::cerr<<"Error opening the file.\n";
         }
-        //lora_app->m_loraHelper.PrintEndDevices(lora_app->m_vehicles,lora_app->m_rspus, "PrintEndDevices.dat"); 
     }
 }
 
