@@ -173,11 +173,15 @@ namespace ns3{
 
         //--- Helpers ---//
         Ptr<LoraChannel> m_loraChannel; 
+        Ptr<LoraChannel> DedicatedChannel; 
         LoraPhyHelper m_phyHelper; 
+        LoraPhyHelper m_critical_phyHelper;
         LorawanMacHelper m_macHelper; 
+        LorawanMacHelper m_critical_macHelper; 
         LoraHelper m_loraHelper; 
+        LoraHelper m_critical_loraHelper;
         ForwarderHelper m_forwarderHelper; 
-        
+
       protected:
         virtual void ParseCommandLineArguments(int argc, char** argv); 
         virtual Ptr<LoraChannel> ConfigureChannel();
@@ -303,20 +307,22 @@ namespace ns3{
         }else if(address.IsBroadcast() && lora_app->event_occurred){
             //This is an emergency Broadcast event.
             NS_LOG_DEBUG("Emergency broadcast transmission is sent...");
+            std::cout<<"Emergency broadcast transmission is sent..." << std::endl;
             for(uint32_t node = 0; node <lora_app->gwAddresses_vec.size(); node++){
                 lora_app->gw_next_broad.push(lora_app->m_rspus.Get(node)->GetDevice(0)->GetObject<LoraNetDevice>()-> GetMac()->GetObject<GatewayLorawanMac>()-> GetWaitingTime(869.525)); 
             }
             Simulator::Schedule(Seconds(150),[](){
-                    lora_app->event_occurred = false;
-                    tuple<int,uint32_t,uint32_t,Time> tmp; 
-                    std::cout<<lora_app->ED_in_danger_Emergency<<" & " << lora_app->Num_EDs_received_EM<<std::endl;
-                    tmp = make_tuple(lora_app->emergency_event_id, lora_app->ED_in_danger_Emergency,lora_app->Num_EDs_received_EM,(Simulator::Now())); 
-                    lora_app->EmergencyVector.push_back(tmp);
-                    lora_app->emergency_time = 0;
-                });
+                lora_app->event_occurred = false;
+                tuple<int,uint32_t,uint32_t,Time> tmp; 
+                std::cout<<lora_app->ED_in_danger_Emergency<< " & " << lora_app->Num_EDs_received_EM<<std::endl;
+                tmp = make_tuple(lora_app->emergency_event_id, lora_app->ED_in_danger_Emergency,lora_app->Num_EDs_received_EM,(Simulator::Now())); 
+                lora_app->EmergencyVector.push_back(tmp);
+                lora_app->emergency_time = 0;
+            });
 
         }else{
-            //NS_LOG_DEBUG("ACK  transmission is sent...");
+            NS_LOG_DEBUG("ACK  transmission is sent...");
+            //std::cout<<"ACK  transmission is sent..."<<std::endl;
             lora_app->Correct_ACK_GW_transmissions++; 
         }
         lora_app->Correct_GW_DL_transmissions++; 
@@ -327,6 +333,7 @@ namespace ns3{
 
     //--- The Broadcast message of the GW  ---//
     Ptr<Packet> CreateBroadcastPacket(Ptr<Packet> data){ 
+        NS_LOG_FUNCTION_NOARGS();
         LoraDeviceAddress address;
         address.SetNwkID (0x7F);
         address.SetNwkAddr (0x1FFFFFF);
@@ -351,10 +358,11 @@ namespace ns3{
         packet->AddPacketTag (tag);
         NS_LOG_DEBUG("Broadcast packet created succesfully!!");
         return packet; 
+        NS_LOG_FUNCTION_NOARGS();
     }
 
      void CreateSubsets(){
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
         if(lora_app->excluded_nodes.size() != 0){lora_app->excluded_nodes.clear();} //Create a new excluded list due to movement and new addition of nodes. 
         lora_app->applicable_nodes = 0; //Value changes just like excluded_nodes. 
         //Function to create the subsets based on distance. 
@@ -379,8 +387,7 @@ namespace ns3{
             }else if(ack_pos != lora_app->ACK_Devices.end()){
                 continue; 
             }
-
-            //Distance coverage 
+            
             if(distance < 1000.0){
                 (subsets[0]).insert((*edNode));
                 lora_app->applicable_nodes++; 
@@ -427,12 +434,12 @@ namespace ns3{
             lora_app->NodeCreationVector.push_back(tmp);
             lora_app->creation_flag = false; 
         }
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
     }
 
     //--- This is necessary only in the case that we want to showcase a GW broadcasting a message by its own. ---///
     std::map<Address,Ptr<NetDevice>> AvailableGWToSend(NodeContainer gateway, LoraDeviceAddress address, int window,Ptr<Packet> packet){
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
         //This function is usefull for getting the real address of the gateway and its availability. 
         if (address.IsBroadcast()){
             lora_app->gwAddresses_vec.clear();
@@ -440,7 +447,7 @@ namespace ns3{
             std::map<Address,Ptr<NetDevice>> gwAddresses;
             for(NodeContainer::Iterator jj = gateway.Begin(); jj != gateway.End(); jj++){
                 Ptr<Node> gwNode = (*jj);
-                Ptr<NetDevice> netDevice = gwNode->GetDevice(0); 
+                Ptr<NetDevice> netDevice = gwNode->GetDevice(1); 
                 Ptr<PointToPointNetDevice> p2pNetDevice; 
                 for (uint32_t i = 0; i < gwNode->GetNDevices(); i++){
                     p2pNetDevice = gwNode->GetDevice (i)->GetObject<PointToPointNetDevice> ();
@@ -481,7 +488,7 @@ namespace ns3{
             return gwAddresses;
 
         }else {
-            //The message is a unicast transmission. TODO: Have the ns successfully send dedicated messages to the end devices. 
+            //The message is a unicast transmission. TODO: Have the ns or the GW successfully send dedicated messages to the end devices. 
             Ptr<EndDeviceStatus> edStatus = lora_app->m_endDeviceStatuses.at(address); 
             double replyFrequency; 
             if (window == 1){
@@ -503,21 +510,23 @@ namespace ns3{
             }
             return bestGWAddress;
         }
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
     }
 
     //--- Callback to check if the broadcastted packet reached the phy layer ---//
     void GWPhyRxBeginCallback(Ptr<Packet const> packet){
+        //NS_LOG_FUNCTION_NOARGS();
         LorawanMacHeader mHdr;
         LoraFrameHeader fHdr;
         Ptr<Packet> myPacket = packet->Copy();
         myPacket->RemoveHeader(mHdr);
         myPacket->RemoveHeader(fHdr);
+        //NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Have the Network Server send the broadcast emergency packet ---//
     void NSSendPacketCallback(Ptr<NetworkServer> server, Ptr<Packet> pkt, LoraDeviceAddress endDevice) {
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
         if(lora_app->event_occurred){
             NS_LOG_DEBUG("Emergency Broadcast Transmission Enabled."); 
             Ptr<NetworkStatus> net_status = server->GetNetworkStatus(); 
@@ -552,7 +561,7 @@ namespace ns3{
             
         }
         lora_app->NS_success_broadcasts++;
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
     }
 
     //--- Reception of Packets for GWs ---//
@@ -571,9 +580,10 @@ namespace ns3{
         lora_app->packetsReceived.at(tag.GetSpreadingFactor()-7)++; 
         lora_app->Correct_GW_UL_receptions++;
         if(lora_app->event_occurred && lora_app->m_flag == 1000){ 
+
             if(address == lora_app->sensor_Address){
+                std::cout<<"Reached here after event callback"<<std::endl;
                 lora_app->m_flag = 0; 
-                lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<ClassCEndDeviceLorawanMac>()->OpenSecondReceiveWindow(false);
                 Time diff = Simulator::Now() - lora_app->broadcast_time; 
                 lora_app->m_ns -> AddNode(lora_app->sensorNode.Get(0));
                 Ptr<PeriodicSender> app = lora_app->sensorNode.Get(0)->GetApplication(0)->GetObject<PeriodicSender>(); 
@@ -596,11 +606,13 @@ namespace ns3{
         Ptr<NetworkStatus> net_status = lora_app->m_ns->GetNetworkStatus(); 
         std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> endDeviceStatuses = net_status->m_endDeviceStatuses;
         if(endDeviceStatuses.find(address)==endDeviceStatuses.end()){
+            //If device is not registered in the network
             /*********CHECKING FIRST RECEPTION TO GRANT ACCESS TO THE NETWORK**************/
             Bimap::right_const_iterator it = lora_app->m_createdNodes.right.find(address);
             auto add_pos = lora_app->m_endDeviceStatuses.find(address);
             if (add_pos != lora_app->m_endDeviceStatuses.end()  &&  it != lora_app->m_createdNodes.right.end()){
-                /***********IF device has accepted an echo broadcast and it was just created in the network***********/
+                //If device has accepted an echo broadcast and it was just created in the network. 
+                /***********IF THE DEVICE HAS SENT ONCE && IT IS THE FIRST TIME WE ARE RECEIVING THEN ADD DEVICE TO NETWORK***********/
                 Ptr<EndDeviceLorawanMac> tobeAdded = lora_app->m_endDeviceStatuses[address] -> GetMac();
                 lora_app->accepted_devices++;
                 lora_app->m_ns -> GetNetworkStatus() ->AddNode(tobeAdded);
@@ -634,11 +646,12 @@ namespace ns3{
         if(!successful){
             lora_app->failed_transmissions_EDs++;
         }
+        //NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Successfull transmission of packet from the ED towards the GW ---//
     void EdDeviceSenttoPhyCallback (Ptr<const Packet> packet, uint32_t index) {
-         
+        //NS_LOG_FUNCTION_NOARGS(); 
         Ptr<Packet> packetCopy = packet->Copy();
         LoraTag tag;
         packet->PeekPacketTag(tag);
@@ -653,12 +666,12 @@ namespace ns3{
         
         //--- Update the state of the end Device ---//
         lora_app->vehicles_States[(address)] = "TX_F";
-         
+        //NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Callback to handle the reception of packet send from the GW/NS to the ED ---//
     void CorrectReceptionEDCallback(Ptr<Packet const> packet, uint32_t recepientId){
-         
+        //NS_LOG_FUNCTION_NOARGS(); 
         Ptr<Packet> myPacket = packet->Copy();
         LorawanMacHeader mHdr;
         LoraFrameHeader fHdr;
@@ -672,14 +685,18 @@ namespace ns3{
         lora_app->ignore_broadcast_nodes.push(true);
 
         LoraDeviceAddress addr = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress(); 
+        if (addr == lora_app->sensor_Address){
+            return; 
+        }
         
         std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> endDeviceStatuses = lora_app->m_ns->GetNetworkStatus()->m_endDeviceStatuses;
         auto exl_node = std::find(lora_app->excluded_nodes.begin(), lora_app->excluded_nodes.end(),cur_node);
         if(exl_node!=lora_app->excluded_nodes.end()){
             return; 
         }else if(lora_app->remainingNodes.find(cur_node) != lora_app->remainingNodes.end() && txAddress.IsBroadcast()){
-            //If the node is pending for an ACK && broadcast message was received. 
+                        //If the node is pending for an ACK && broadcast message was received. 
             //NS_LOG_DEBUG("Remaining Nodes -> " << lora_app->remainingNodes.size());
+            NS_LOG_DEBUG(cur_node);
             if(endDeviceStatuses.find(addr)!=endDeviceStatuses.end()){
                     //But device has sent a message. 
                 if(lora_app->EmergencyQueue.find(addr)!=lora_app->EmergencyQueue.end() && lora_app->event_occurred){
@@ -732,9 +749,11 @@ namespace ns3{
             lora_app->ignore_broadcast_nodes.pop();
             lora_app->ignore_broadcast_nodes.push(false);
         }
+        //NS_LOG_FUNCTION_NOARGS();
     }
 
     void CreateEventCallback(Ptr<Packet> packet){
+        NS_LOG_FUNCTION_NOARGS();
         //Have a new remote node send an emergency message to the NS and the nerwork server replying to all the devices inside the network at that point in time 
         lora_app->emergency_time = Simulator::Now().GetSeconds(); 
         lora_app->event_occurred = true; 
@@ -758,45 +777,23 @@ namespace ns3{
         lora_app->ED_in_danger_Emergency=0;
         lora_app->Num_EDs_received_EM = 0; 
         if(!lora_app->EmergencyQueue.empty()){lora_app->EmergencyQueue.clear();} 
-
         lora_app->m_flag = 1000; 
-        if(lora_app->emergency_event_id == 1){
-            //Create the conditions of the sensor to send the information. 
-            Ptr<LogDistancePropagationLossModel> loss = CreateObject<LogDistancePropagationLossModel> ();
-            loss->SetPathLossExponent (3.76);
-            loss->SetReference (1, 7.7);
-            Ptr<PropagationDelayModel> delay = CreateObject<ConstantSpeedPropagationDelayModel> ();
-            Ptr<LoraChannel> DedicatedChannel = CreateObject<LoraChannel>(loss,delay); 
-            Ptr<LoraDeviceAddressGenerator> addrGen = CreateObject<LoraDeviceAddressGenerator> (60,1900);
-            lora_app->m_phyHelper.SetDeviceType(LoraPhyHelper::ED);
-            lora_app->m_macHelper.SetDeviceType(LorawanMacHelper::ED_C); 
-            lora_app->m_macHelper.SetAddressGenerator(addrGen); 
-            lora_app->m_loraHelper.Install(lora_app->m_phyHelper,lora_app->m_macHelper,lora_app->sensorNode); 
-            lora_app->sensor_Address = (lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress());    
-            lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetPhy()->TraceConnectWithoutContext("StartSending",MakeCallback(&ns3::EdDeviceSenttoPhyCallback));
-            lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->SetMType(LorawanMacHeader::UNCONFIRMED_DATA_UP);
-            lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->SetDataRate(5); 
-            lora_app->m_macHelper.SetSpreadingFactorsUp(lora_app->sensorNode,lora_app->m_rspus,DedicatedChannel);
-        }
-        
         Ptr<MobilityModel> sensorMob = lora_app->sensorNode.Get(0)->GetObject<MobilityModel>();
         Ptr<NetworkStatus> net_status = lora_app->m_ns->GetNetworkStatus(); //Get the netStatus object to access information 
         std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> endDeviceStatuses = net_status->m_endDeviceStatuses; //Get the end device statuses that are in the network 
         std::string vehicle_state ("RX_P");
-        LoraDeviceAddress sensor = (lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress()); 
-
         for(auto endDevice : endDeviceStatuses){
-            Ptr<EndDeviceLorawanMac> edmac = endDevice.second ->GetMac()->GetObject<EndDeviceLorawanMac>(); 
-            Ptr<NetDevice> net = edmac->GetDevice();
-            Ptr<Node> node = net->GetNode();
-            Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac() ->GetObject<ClassCEndDeviceLorawanMac>();
-
-            if(endDevice.first == sensor ){continue;} // Do'not include the sensor in the emergency message. 
+            
+            
+            if(endDevice.first == lora_app->sensor_Address ){continue;} // Do'not include the sensor in the emergency message. 
             /*if((vehicle_state.compare(lora_app->vehicles_States[endDevice.first]))!=0){
                 edLorawanMac ->OpenSecondReceiveWindow(false);
                 lora_app->vehicles_States[endDevice.first] = "RX_P";
             }*/
-            
+            Ptr<EndDeviceLorawanMac> edmac = endDevice.second ->GetMac()->GetObject<EndDeviceLorawanMac>(); 
+            Ptr<NetDevice> net = edmac->GetDevice();
+            Ptr<Node> node = net->GetNode();
+            Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac() ->GetObject<ClassCEndDeviceLorawanMac>();
             double distance = sensorMob->GetDistanceFrom(node->GetObject<MobilityModel>()); // Check the distance between sensor and the vehicles.             
             if(distance<=2400.0){
                 lora_app->EmergencyQueue.insert(endDevice.first);
@@ -804,24 +801,26 @@ namespace ns3{
             }
            
         }
-        
         Count_Endangered.at(nSims) =  Count_Endangered.at(nSims) + (lora_app->ED_in_danger_Emergency);
-
+        
         lora_app->perShot.SetPeriod(Seconds(10)); //Periodically send a message into the gateway.  
         lora_app->perShot.SetPacketSize(10); 
         lora_app->perShot.Install(lora_app->sensorNode);
         Ptr<PeriodicSender> app = lora_app->sensorNode.Get(0)->GetApplication(0)->GetObject<PeriodicSender>(); 
         app->StartApplication(); 
+
         lora_app->EDs_in_NS_at_Emergency = lora_app->m_ns->GetNetworkStatus()->CountEndDevices();
-        NS_LOG_FUNCTION("An emergency event id was triggered, sensor reacted to an abnormal activity! The size of the Emergency Queue is => " << lora_app->EmergencyQueue.size());
         std::cout<<"An emergency event id was triggered, sensor reacted to an abnormal activity! The size of the Emergency Queue is => " << lora_app->EmergencyQueue.size()<<std::endl;
         NS_LOG_FUNCTION_NOARGS(); 
     }
 
     //--- Callback Function to handle the GW broadcast towards the end devices ---//
     void BroadcastGenerationCallback(Ptr<Packet> data, NodeContainer gateway, bool autonomousGW){
-        NS_LOG_FUNCTION_NOARGS(); 
-     
+        //NS_LOG_FUNCTION_NOARGS(); 
+
+        //Diference in these other than that in the first the GW alone decides to sent the echo packet ,is the waiting time. 
+        //In the first method the waiting time approaches values greater than 10s. However on the Second it is 0s. This is not what really happens. 
+        //Wait time is the same but the time which we call to get the wait time is different.  
         if(!lora_app->ignore_broadcast_nodes.empty()){
             while(!lora_app->ignore_broadcast_nodes.empty()){
                 lora_app->ignore_broadcast_nodes.pop();
@@ -861,10 +860,11 @@ namespace ns3{
             Simulator::ScheduleNow(&ns3::NSSendPacketCallback , lora_app->m_ns, Create<Packet>(10),LoraDeviceAddress(0xFF, 0xFFFFFFFF)); 
         }
         lora_app->broadcast_time = Simulator::Now();
-        NS_LOG_FUNCTION_NOARGS(); 
+        //NS_LOG_FUNCTION_NOARGS(); 
     }
 
     void OccupiedReceptionPathsCallback(int m_receptionPaths, int systemID){
+        //NS_LOG_FUNCTION_NOARGS();
         if (systemID==0){
             Ptr<Node> gateway = lora_app->m_rspus.Get(0); 
             Ptr<GatewayLoraPhy> gwPhy = gateway->GetDevice(0)->GetObject<LoraNetDevice>()->GetPhy()->GetObject<GatewayLoraPhy>(); 
@@ -875,9 +875,12 @@ namespace ns3{
                 m_availablePaths++; 
             }
         }
+        //NS_LOG_FUNCTION_NOARGS();
     }
 
     void CorrectReceptionMACCallback(Ptr<Packet const> packet){
+        
+        //NS_LOG_FUNCTION_NOARGS();
         Ptr<Packet> myPacket = packet->Copy();
         LorawanMacHeader mHdr;
         LoraFrameHeader fHdr;
@@ -892,9 +895,13 @@ namespace ns3{
         Ptr<Node> cur_node = lora_app->m_vehicles.Get((iter));
         LoraDeviceAddress addr = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress(); 
         lora_app->phy_end_reception_count.pop(); 
+       // std::cout<<"Ignore broadcast must bethe problem ";
         bool answ = lora_app->ignore_broadcast_nodes.front();
         lora_app->ignore_broadcast_nodes.pop();
-
+       // std::cout<<"It is not?????!"<<std::endl;
+        if (addr == lora_app->sensor_Address){
+            return; 
+        }
         auto exl_node = std::find(lora_app->excluded_nodes.begin(), lora_app->excluded_nodes.end(),cur_node);
         if(exl_node!=lora_app->excluded_nodes.end()){
             //Device out of range. 
@@ -968,6 +975,7 @@ namespace ns3{
                 }   
             }
         }
+        //NS_LOG_FUNCTION_NOARGS();
     }
 
     class DynamicGateway : public LoraApp{
@@ -1029,6 +1037,11 @@ namespace ns3{
         NodeContainer m_networkServer;
         NetworkServerHelper m_networkServerHelper; 
     };
+
+
+    // Φτιάξε ένα dedicated κανάλι επικοινωνίας μόνο για τα broadcasts 
+    
+
 
     NS_OBJECT_ENSURE_REGISTERED(DynamicGateway);
 
@@ -1092,16 +1105,16 @@ namespace ns3{
         //LogComponentEnable("NetworkServer", LOG_LEVEL_ALL);  
         //LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
         //LogComponentEnable("NetworkStatus", LOG_LEVEL_ALL); 
-        //LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
-        //LogComponentEnable("GatewayStatus",LOG_LEVEL_ALL);
         //LogComponentEnable("LoraNetDevice", LOG_LEVEL_ALL);
         //LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
         //LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
         //LogComponentEnable("LoraChannel", LOG_LEVEL_INFO); //*******************
         //LogComponentEnable("LoraPhy", LOG_LEVEL_ALL);
         //LogComponentEnable("EndDeviceLoraPhy", LOG_LEVEL_ALL);
-        //LogComponentEnable("GatewayLoraPhy", LOG_LEVEL_ALL);
-        //LogComponentEnable("SimpleGatewayLoraPhy", LOG_LEVEL_ALL);
+        LogComponentEnable("GatewayLoraPhy", LOG_LEVEL_ALL);
+        LogComponentEnable("SimpleGatewayLoraPhy", LOG_LEVEL_ALL);
+        LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
+        LogComponentEnable("GatewayStatus",LOG_LEVEL_ALL);
         //LogComponentEnable("LoraPhyHelper", LOG_LEVEL_ALL);
         //LogComponentEnable("SimpleEndDeviceLoraPhy", LOG_LEVEL_ALL);
         //LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
@@ -1121,10 +1134,11 @@ namespace ns3{
         //LogComponentEnable("Ns2MobilityHelper", LOG_LEVEL_DEBUG); 
         //LogComponentEnable("LoraPacketTracker", LOG_LEVEL_ALL);
         //LogComponentEnable ("AdrComponent", LOG_LEVEL_ALL);
-        LogComponentEnable("AnimationInterface", LOG_LEVEL_ALL); 
+        //LogComponentEnable("AnimationInterface", LOG_LEVEL_ALL); 
 
         m_os.open(m_logFile); 
         Packet::EnablePrinting(); 
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Gets the input of the cmd and initializes the values of the basic variables ---//
@@ -1176,6 +1190,7 @@ namespace ns3{
             HandleBuildings();
         }
         ConfigureInitialNodes(); 
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Setting the configuration file from global class variables and initialize them from cmd  ---//
@@ -1214,6 +1229,7 @@ namespace ns3{
         m_emergency_time = uintegerValue.Get(); 
         GlobalValue::GetValueByName("LEemergency",booleanValue); 
         m_emergency = booleanValue.Get();
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Set the global variables from the configuration file  ---//
@@ -1239,7 +1255,7 @@ namespace ns3{
         g_additional_node_creation.SetValue(BooleanValue(m_additional_node_creation));
         g_emergency_time.SetValue(UintegerValue(m_emergency_time)); 
         g_emergency.SetValue(BooleanValue(m_emergency));
-
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Configure the channel to be used  ---//
@@ -1258,6 +1274,7 @@ namespace ns3{
 
             Ptr<PropagationDelayModel> delay = CreateObject<ConstantSpeedPropagationDelayModel> ();
             return CreateObject<LoraChannel> (loss, delay);
+            NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Configure the Helpers depending on the occassion ---//
@@ -1265,37 +1282,94 @@ namespace ns3{
         NS_LOG_FUNCTION(state); 
         switch (state){
             case 0: //Initialization 
-                lora_app->m_phyHelper = LoraPhyHelper();
-                lora_app->m_phyHelper.SetChannel(lora_app->m_loraChannel);
-                lora_app->m_macHelper = LorawanMacHelper();   
-                lora_app->m_loraHelper = LoraHelper(); 
-                lora_app->m_loraHelper.EnablePacketTracking(); 
-                break;
-            case 1: //Configure channels for Gateways. 
-                lora_app->m_phyHelper.SetDeviceType(LoraPhyHelper::GW); 
-                lora_app->m_macHelper.SetDeviceType(LorawanMacHelper::GW); 
-                lora_app->m_macHelper.SetRegion(LorawanMacHelper::EU); 
-                lora_app->m_loraHelper.Install(lora_app->m_phyHelper,lora_app->m_macHelper,nodes);
-                break; 
-            case 2: //Configure the initial vehicles 
-                lora_app->m_phyHelper.SetDeviceType(LoraPhyHelper::ED);
-                lora_app->m_macHelper.SetDeviceType(LorawanMacHelper::ED_C);
-                lora_app->m_macHelper.SetAddressGenerator(m_addrGen);
-                lora_app->m_macHelper.SetRegion(LorawanMacHelper::EU);
-                lora_app->m_loraHelper.Install(lora_app->m_phyHelper, lora_app->m_macHelper, nodes);
-                break; 
-            case 4: //Only install helper onto the new nodes. 
-                m_nwkId = m_nwkId +  1;
-                m_nwkAddr = m_nwkAddr + 10;  
-                m_addrGen = CreateObject<LoraDeviceAddressGenerator> (m_nwkId,m_nwkAddr);
-                lora_app->m_phyHelper.SetDeviceType(LoraPhyHelper::ED);
-                lora_app->m_macHelper.SetDeviceType(LorawanMacHelper::ED_C);
-                lora_app->m_macHelper.SetAddressGenerator(m_addrGen);
-                lora_app->m_macHelper.SetRegion(LorawanMacHelper::EU);
-                lora_app->m_loraHelper.Install(lora_app->m_phyHelper, lora_app->m_macHelper, nodes);
+                {
+                    Ptr<LoraDeviceAddressGenerator> addgen = CreateObject<LoraDeviceAddressGenerator> (60,1900);
+                    // Η σημαντική επικοινωνία γίνεται σε συγκεκριμένο κανάλι επικοινωνίας για να διασφαλιστεί η επιτυχία της επικοινωνίας
+                    lora_app->m_critical_phyHelper = LoraPhyHelper();
+                    lora_app->m_critical_phyHelper.SetChannel(lora_app->DedicatedChannel);
+                    lora_app->m_critical_macHelper = LorawanMacHelper(); 
+                    lora_app->m_critical_loraHelper = LoraHelper(); 
+                    lora_app->m_critical_loraHelper.EnablePacketTracking();
+                    lora_app->m_critical_phyHelper.SetDeviceType (LoraPhyHelper::ED);
+                    lora_app->m_critical_macHelper.SetDeviceType (LorawanMacHelper::ED_A);
+                    lora_app->m_critical_macHelper.SetAddressGenerator (addgen);
+                    lora_app->m_critical_macHelper.SetRegion (LorawanMacHelper::EU);
+                    
+                    m_nwkId = m_nwkId;
+                    m_nwkAddr = m_nwkAddr;  
+                    m_addrGen = CreateObject<LoraDeviceAddressGenerator> (m_nwkId,m_nwkAddr);
+                    lora_app->m_phyHelper = LoraPhyHelper();
+                    lora_app->m_phyHelper.SetChannel(lora_app->m_loraChannel);
+                    lora_app->m_macHelper = LorawanMacHelper();   
+                    lora_app->m_loraHelper = LoraHelper(); 
+                    lora_app->m_loraHelper.EnablePacketTracking(); 
+                    lora_app->m_phyHelper.SetDeviceType (LoraPhyHelper::ED);
+                    lora_app->m_macHelper.SetDeviceType (LorawanMacHelper::ED_C);
+                    lora_app->m_macHelper.SetAddressGenerator (m_addrGen);
+                    lora_app->m_macHelper.SetRegion (LorawanMacHelper::EU);
+                    std::cout<<"Completed Initial creation of helpers for the two channels"<<std::endl;
+                    break;
+                }
+            case 1: //Configure channels for Sensor. 
+                {
+                    lora_app->m_critical_loraHelper.Install(lora_app->m_critical_phyHelper,lora_app->m_critical_macHelper,nodes);
+                    lora_app->sensor_Address = (nodes.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress());
+                    std::cout<<"Installation of channel into the sensor complete"<<std::endl;
+                    break; 
+                }
+            case 2: //Configure the vehicles 
+                {
+                    lora_app->m_loraHelper.Install(lora_app->m_phyHelper, lora_app->m_macHelper, nodes);
+                    break; 
+                }
+            case 4: //Only install helper onto the new nodes.
+                {
+                    lora_app->m_critical_phyHelper.SetDeviceType (LoraPhyHelper::GW);
+                    lora_app->m_phyHelper.SetDeviceType (LoraPhyHelper::GW);
+                    lora_app->m_critical_macHelper.SetDeviceType (LorawanMacHelper::GW);
+                    lora_app->m_macHelper.SetDeviceType (LorawanMacHelper::GW);
+                    lora_app->m_critical_macHelper.SetRegion(LorawanMacHelper::EU); 
+                    lora_app->m_macHelper.SetRegion(LorawanMacHelper::EU); 
+                    lora_app->m_critical_loraHelper.Install (lora_app->m_critical_phyHelper, lora_app->m_critical_macHelper, nodes);
+                    lora_app->m_loraHelper.Install (lora_app->m_phyHelper, lora_app->m_macHelper, nodes);
+                    break;
+                } 
+            case 6: // Install the necessary helpers to the server node 
+                {
+                    lora_app->m_critical_macHelper.SetSpreadingFactorsUp (lora_app->sensorNode, nodes, lora_app->DedicatedChannel);
+                    lora_app->m_macHelper.SetSpreadingFactorsUp (lora_app->m_vehicles, nodes, lora_app->m_loraChannel);
+
+                    // Ptr<LoraDeviceAddressGenerator> addgen = CreateObject<LoraDeviceAddressGenerator> (60,1900);
+                    // lora_app->m_critical_phyHelper.SetChannel(lora_app->DedicatedChannel); 
+                    // lora_app->m_critical_phyHelper.SetDeviceType(LoraPhyHelper::ED); 
+                    // lora_app->m_critical_macHelper.SetDeviceType(LorawanMacHelper::ED_A); 
+                    // lora_app->m_critical_macHelper.SetAddressGenerator(addgen);
+                    // lora_app->m_critical_macHelper.SetRegion(LorawanMacHelper::EU);
+                    //lora_app->m_critical_loraHelper.Install(lora_app->m_critical_phyHelper,lora_app->m_critical_macHelper,nodes);
+                    //nodes.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetPhy()->TraceConnectWithoutContext("StartSending",MakeCallback(&ns3::EdDeviceSenttoPhyCallback));
+
+                    //Επικοινωνησε με την πύλη σε συγκεκριμένο κανάλι με άλλη συχνότητα που ανήκει στις υπό μπάντες συχνοτήτων
+                       
+                    break;
+                }
+            case 8: 
+                {
+                    m_nwkId = m_nwkId +  1;
+                    m_nwkAddr = m_nwkAddr + 10;  
+                    m_addrGen = CreateObject<LoraDeviceAddressGenerator> (m_nwkId,m_nwkAddr);
+                    lora_app->m_phyHelper.SetDeviceType (LoraPhyHelper::ED);
+                    lora_app->m_macHelper.SetDeviceType (LorawanMacHelper::ED_C);
+                    lora_app->m_macHelper.SetAddressGenerator(m_addrGen);   
+                    lora_app->m_macHelper.SetRegion(LorawanMacHelper::EU); 
+                    lora_app->m_loraHelper.Install(lora_app->m_phyHelper, lora_app->m_macHelper, nodes);
+                    break;
+                }
             default:
-                break;
+                {
+                    break;
+                }
         }
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //---  Creating the mobility of the new devices ---//
@@ -1331,18 +1405,92 @@ namespace ns3{
             mobilityVehicles.Install(new_vehicles); 
         }
     
-        //Install to the newly created ED the phy and mac helpers. 
-        ConfigureHelpers(state,new_vehicles); 
-
-        //Connect the devices to the trace sources to get real time data and results based on callbacks. 
-        for(NodeContainer::Iterator jj = new_vehicles.Begin(); jj!=new_vehicles.End(); ++jj){
-        
+        //Βάλε τους ύψος να μην είναι στο έδαφος.
+        for(NodeContainer::Iterator jj = lora_app->m_vehicles.Begin(); jj!=lora_app->m_vehicles.End(); ++jj){
             //Get the vehicles off the ground into a height. 
             Ptr<MobilityModel> vel_mob = (*jj)->GetObject<MobilityModel>();
             Vector position = vel_mob->GetPosition();
             position.z = 1.2; 
             vel_mob->SetPosition(position); 
+        }
 
+        //Creation of clusters to store up to 8 devices to communicate with the gateway directly. 
+        NS_LOG_DEBUG("Creation of Nodes was successfull with count :: " << lora_app->vehicles_States.size());
+        NS_LOG_FUNCTION_NOARGS();
+        return new_vehicles; 
+    }
+
+    //--- Configure the initial state of the simulation. Starting Nodes for GW, NS, EDs. ---//
+    void DynamicGateway::ConfigureInitialNodes(){
+        
+        NS_LOG_FUNCTION_NOARGS(); 
+        
+        //Create the channel for the experiment. 
+        lora_app->m_loraChannel = ConfigureChannel();
+        lora_app->DedicatedChannel = ConfigureChannel();
+        //Set Up the initial Phy, Mac and Lora Helpers. 
+        ConfigureHelpers(0, m_networkServer);
+  
+        /*******************Creating the Network Server node************************/
+        MobilityHelper mobilityNs;
+        Ptr<ListPositionAllocator> positionAllocNs = CreateObject<ListPositionAllocator> ();
+        positionAllocNs->Add (Vector (0.0,0.0,0.0));
+        mobilityNs.SetPositionAllocator (positionAllocNs);
+        mobilityNs.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+        m_networkServer.Create(1); 
+        mobilityNs.Install(m_networkServer);
+
+        /*******************Creating the RSPU nodes ************************/
+        MobilityHelper mobilityGw;
+        Ptr<ListPositionAllocator> positionAllocGw = CreateObject<ListPositionAllocator> ();
+        positionAllocGw->Add (Vector (710.59,497.63,15.0));
+        //positionAllocGw->Add (Vector (245.20,869.94,15.0));
+        //positionAllocGw->Add (Vector (490.35,671.70,15.0));
+        //positionAllocGw->Add (Vector (924.46,324.26,15.0));
+        //positionAllocGw->Add (Vector (1132.64,157.29,15.0));
+        mobilityGw.SetPositionAllocator (positionAllocGw);
+        mobilityGw.SetMobilityModel ("ns3::ConstantPositionMobilityModel"); 
+        lora_app->m_rspus.Create(m_nRspu);
+        mobilityGw.Install(lora_app->m_rspus); 
+        
+        /******************* Creating the additional sensor node in the edge of the network *****************/        
+        lora_app->sensorNode.Create(1);
+        MobilityHelper sensor_mobility; 
+        Ptr<ListPositionAllocator> positionSensor = CreateObject<ListPositionAllocator> ();
+        //positionSensor->Add (Vector (5710.59,497.63,10.0));
+        positionSensor->Add (Vector (1132.64,157.29,15.0));
+        sensor_mobility.SetPositionAllocator (positionSensor);
+        sensor_mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+        sensor_mobility.Install(lora_app->sensorNode); 
+        ConfigureHelpers(1,lora_app->sensorNode); //Προσθέτουμε την εφαρμογή στον σένορα με το σημαντικό κανάλι. 
+        Ptr<LorawanMac> edMacsensor = lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice> ()->GetMac ();
+        LogicalLoraChannelHelper channelHelper = edMacsensor->GetLogicalLoraChannelHelper();
+        Ptr<LogicalLoraChannel> criticalChannel = CreateObject<LogicalLoraChannel> (868.8, 0, 5);
+        Ptr<LogicalLoraChannel> lc1 = CreateObject<LogicalLoraChannel> (868.1, 0, 5);
+        Ptr<LogicalLoraChannel> lc2 = CreateObject<LogicalLoraChannel> (868.3, 0, 5);
+        Ptr<LogicalLoraChannel> lc3 = CreateObject<LogicalLoraChannel> (868.5, 0, 5);
+        channelHelper.RemoveChannel(lc1); 
+        channelHelper.RemoveChannel(lc2);
+        channelHelper.RemoveChannel(lc3);
+        channelHelper.AddChannel(criticalChannel);    
+        edMacsensor->SetLogicalLoraChannelHelper(channelHelper);   
+        Ptr<EndDeviceLoraPhy> edPhysensor = lora_app->sensorNode.Get(0)->GetDevice(0)->GetObject<LoraNetDevice>()->GetPhy()->GetObject<EndDeviceLoraPhy>();  
+        edPhysensor -> TraceConnectWithoutContext("StartSending", MakeCallback(&ns3::EdDeviceSenttoPhyCallback));
+        edMacsensor -> TraceConnectWithoutContext("CannotSendBecauseDutyCycle", MakeCallback(&ns3::EDSentRejectionCallback));
+        edMacsensor -> TraceConnectWithoutContext("RequiredTransmissions", MakeCallback(&ns3::FinishedTransmissionCallback));
+        edMacsensor -> GetObject<EndDeviceLorawanMac>()->SetMType(LorawanMacHeader::UNCONFIRMED_DATA_UP);
+        edMacsensor -> GetObject<EndDeviceLorawanMac>()->SetDataRate(0); 
+        
+        std::cout<<"Created the sensor node with helpers"<<std::endl;
+        /*******************Creating the vehicle nodes helpers and installing them ************************/
+        m_addrGen = CreateObject<LoraDeviceAddressGenerator> (m_nwkId,m_nwkAddr);
+        NodeContainer new_vehicles = CreateNodes(2,true, 0, m_initial_nodes,m_traceFile,m_radius); //Βάζουμε στις συσκευές την εφαρμογή για το κατάλληλο κανάλι. 
+        lora_app->m_vehicles.Add(new_vehicles); 
+        ConfigureHelpers(2,lora_app->m_vehicles); 
+        
+        //Connect the devices to the trace sources to get real time data and results based on callbacks. 
+        for(NodeContainer::Iterator jj = lora_app->m_vehicles.Begin(); jj!=lora_app->m_vehicles.End(); ++jj){
+        
             //Get the Mac and Phy Layer for the End device and connect them to their trace sources. 
             Ptr<LorawanMac> edMac = (*jj)->GetDevice (0)->GetObject<LoraNetDevice> ()->GetMac ();
             Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = edMac->GetObject<ClassCEndDeviceLorawanMac>();
@@ -1364,74 +1512,24 @@ namespace ns3{
             edPhy -> TraceConnectWithoutContext("StartSending", MakeCallback(&ns3::EdDeviceSenttoPhyCallback));
             edMac -> TraceConnectWithoutContext("CannotSendBecauseDutyCycle", MakeCallback(&ns3::EDSentRejectionCallback));
             edMac -> TraceConnectWithoutContext("RequiredTransmissions", MakeCallback(&ns3::FinishedTransmissionCallback)); 
+            edLorawanMac->SetMType (LorawanMacHeader::CONFIRMED_DATA_UP);
+
         }
-        
 
-        //Creation of clusters to store up to 8 devices to communicate with the gateway directly. 
-        NS_LOG_DEBUG("Creation of Nodes was successfull with count :: " << lora_app->vehicles_States.size());
-        return new_vehicles; 
-    }
-
-    //--- Configure the initial state of the simulation. Starting Nodes for GW, NS, EDs. ---//
-    void DynamicGateway::ConfigureInitialNodes(){
-        
-        NS_LOG_FUNCTION_NOARGS(); 
-        
-        //Create the channel for the experiment. 
-        lora_app->m_loraChannel = ConfigureChannel();
-
-        //Set Up the initial Phy, Mac and Lora Helpers. 
-        ConfigureHelpers(0, m_networkServer);
-  
-        /*******************Creating the Network Server node************************/
-        MobilityHelper mobilityNs;
-        Ptr<ListPositionAllocator> positionAllocNs = CreateObject<ListPositionAllocator> ();
-        positionAllocNs->Add (Vector (0.0,0.0,0.0));
-        mobilityNs.SetPositionAllocator (positionAllocNs);
-        mobilityNs.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-        m_networkServer.Create(1); 
-        mobilityNs.Install(m_networkServer);
-
-        /******************* Creating the additional sensor node in the edge of the network *****************/        
-        lora_app->sensorNode.Create(1);
-        MobilityHelper sensor_mobility; 
-        Ptr<ListPositionAllocator> positionSensor = CreateObject<ListPositionAllocator> ();
-        positionSensor->Add (Vector (1132.64,157.29,10.0));
-        sensor_mobility.SetPositionAllocator (positionSensor);
-        sensor_mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-        sensor_mobility.Install(lora_app->sensorNode); 
-        
-        /*******************Creating the RSPU nodes ************************/
-        MobilityHelper mobilityGw;
-        Ptr<ListPositionAllocator> positionAllocGw = CreateObject<ListPositionAllocator> ();
-        positionAllocGw->Add (Vector (710.59,497.63,15.0));
-        //positionAllocGw->Add (Vector (245.20,869.94,15.0));
-        //positionAllocGw->Add (Vector (490.35,671.70,15.0));
-        //positionAllocGw->Add (Vector (924.46,324.26,15.0));
-        //positionAllocGw->Add (Vector (1132.64,157.29,15.0));
-        mobilityGw.SetPositionAllocator (positionAllocGw);
-        mobilityGw.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-
-        lora_app->m_rspus.Create(m_nRspu);
-        mobilityGw.Install(lora_app->m_rspus); 
-
-        //Install the rspu to the helpers 
-        ConfigureHelpers(1, lora_app->m_rspus);
+        std::cout<<"Succesfully created the ed nodes + sensors"<<std::endl;
+        ConfigureHelpers(4, lora_app->m_rspus); //Βάζουμε τις κατάλληλες εφαρμογές επικοινωνίας στις πύλες. 
+        ConfigureHelpers(6, lora_app->m_rspus); 
         // Connect the gateways to the trace sources needed to keep track of communications. 
         for(NodeContainer::Iterator jj = lora_app->m_rspus.Begin(); jj != lora_app->m_rspus.End(); jj++){
             (*jj) -> GetDevice(0) -> GetObject<LoraNetDevice> () -> GetMac() -> TraceConnectWithoutContext("SentNewPacket",MakeCallback(&ns3::GwSentPacketCallback)); 
-            (*jj) -> GetDevice(0) -> GetObject<LoraNetDevice> () -> GetPhy() -> TraceConnectWithoutContext("PhyRxBegin",MakeCallback(&ns3::GWPhyRxBeginCallback));
-            (*jj) -> GetDevice(0) -> GetObject<LoraNetDevice> () -> GetPhy() -> GetObject<GatewayLoraPhy>() -> TraceConnectWithoutContext("OccupiedReceptionPaths",MakeCallback(&ns3::OccupiedReceptionPathsCallback)); 
-            (*jj) -> GetDevice(0) -> GetObject<LoraNetDevice> () -> GetPhy() -> TraceConnectWithoutContext("LostPacketBecauseInterference",MakeCallback(&ns3::OnReceiveInterferenceGWCallback));
             (*jj) -> GetDevice(0) -> GetObject<LoraNetDevice> () -> GetPhy() -> TraceConnectWithoutContext("ReceivedPacket",MakeCallback(&ns3::GWReceptioOfReplyPacket));
+            (*jj) -> GetDevice(1) -> GetObject<LoraNetDevice> () -> GetMac() -> TraceConnectWithoutContext("SentNewPacket",MakeCallback(&ns3::GwSentPacketCallback)); 
+            (*jj) -> GetDevice(1) -> GetObject<LoraNetDevice> () -> GetPhy() -> TraceConnectWithoutContext("PhyRxBegin",MakeCallback(&ns3::GWPhyRxBeginCallback));
+            (*jj) -> GetDevice(1) -> GetObject<LoraNetDevice> () -> GetPhy() -> GetObject<GatewayLoraPhy>() -> TraceConnectWithoutContext("OccupiedReceptionPaths",MakeCallback(&ns3::OccupiedReceptionPathsCallback)); 
+            (*jj) -> GetDevice(1) -> GetObject<LoraNetDevice> () -> GetPhy() -> TraceConnectWithoutContext("LostPacketBecauseInterference",MakeCallback(&ns3::OnReceiveInterferenceGWCallback));
+            (*jj) -> GetDevice(1) -> GetObject<LoraNetDevice> () -> GetPhy() -> TraceConnectWithoutContext("ReceivedPacket",MakeCallback(GWReceptioOfReplyPacket));
+
         }
-
-        /*******************Creating the vehicle nodes************************/
-        m_addrGen = CreateObject<LoraDeviceAddressGenerator> (m_nwkId,m_nwkAddr);
-        NodeContainer new_vehicles = CreateNodes(2,true, 0, m_initial_nodes,m_traceFile,m_radius);
-        lora_app->m_vehicles.Add(new_vehicles); 
-        lora_app->m_macHelper.SetSpreadingFactorsUp(lora_app->m_vehicles,lora_app->m_rspus,lora_app->m_loraChannel);
-
 
         /******************* Installing Devices to the network ************************/
         m_networkServerHelper.SetGateways(lora_app->m_rspus); 
@@ -1464,7 +1562,8 @@ namespace ns3{
         }
         NS_LOG_DEBUG("The Number of initial registered devices associated with the channel :: "<<lora_app->m_loraChannel->GetNDevices());
         NS_LOG_DEBUG("Finished Initializing the network, added vehicles and configured the channels.");
-        lora_app->addition_event_id++; 
+        lora_app->addition_event_id++;
+        NS_LOG_FUNCTION_NOARGS(); 
     }
 
 //--- Sets default attributes depending on the classes called by the program. ---//
@@ -1491,7 +1590,7 @@ namespace ns3{
         Simulator::Run(); 
         ProcessOutputs(); 
         Simulator::Destroy(); 
-
+        NS_LOG_FUNCTION_NOARGS();
     }
     
     //--- Handles the creation of buildings to alter the channel parameters. Cannot be showcased in NetAnim ---//
@@ -1543,6 +1642,7 @@ namespace ns3{
                 }
             myfile.close ();
         }
+        NS_LOG_FUNCTION_NOARGS();
     }
     
     void DynamicGateway::ConfigureSimulation(Ptr<DynamicGateway> classInstance){
@@ -1560,8 +1660,42 @@ namespace ns3{
             
             /******************* Installing the phy and mac layer helpers to the new devices ************************/
             lora_app->m_vehicles.Add(new_vehicles); 
+            project_pointer->ConfigureHelpers(8, lora_app->m_vehicles);
             project_pointer->m_initial_nodes = lora_app->m_vehicles.GetN(); 
+            std::cout<<"Created the additioal nodes correctly /// /"<<std::endl;
+
+
+            //Connect the devices to the trace sources to get real time data and results based on callbacks. 
+            for(NodeContainer::Iterator jj = lora_app->m_vehicles.Begin(); jj!=lora_app->m_vehicles.End(); ++jj){
+            
+                //Get the Mac and Phy Layer for the End device and connect them to their trace sources. 
+                Ptr<LorawanMac> edMac = (*jj)->GetDevice (0)->GetObject<LoraNetDevice> ()->GetMac ();
+                Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = edMac->GetObject<ClassCEndDeviceLorawanMac>();
+                LoraDeviceAddress address = edLorawanMac->GetDeviceAddress();
+                Ptr<EndDeviceLoraPhy> edPhy = (*jj)->GetDevice(0)->GetObject<LoraNetDevice>()->GetPhy()->GetObject<EndDeviceLoraPhy>(); 
+
+                //The End Device is in listening Mode. 
+                lora_app->vehicles_States.insert(pair<LoraDeviceAddress, std::string>(address,"RX_P"));             
+
+                //End device Opens second reception window due to frequency used by the Gateway to broadcast the message. 
+                edLorawanMac->OpenSecondReceiveWindow(false); //Indefinetly open second receive window
+                
+                //Add the newly created Device into a Bimap to use later. 
+                lora_app->m_createdNodes.insert({(*jj), address}); 
+
+                //Trace Sources to be used by the End Device.  
+                edPhy -> TraceConnectWithoutContext("ReceivedPacket",MakeCallback(&ns3::CorrectReceptionEDCallback));
+                edMac -> TraceConnectWithoutContext("ReceivedPacket",MakeCallback(&ns3::CorrectReceptionMACCallback));
+                edPhy -> TraceConnectWithoutContext("StartSending", MakeCallback(&ns3::EdDeviceSenttoPhyCallback));
+                edMac -> TraceConnectWithoutContext("CannotSendBecauseDutyCycle", MakeCallback(&ns3::EDSentRejectionCallback));
+                edMac -> TraceConnectWithoutContext("RequiredTransmissions", MakeCallback(&ns3::FinishedTransmissionCallback)); 
+                edLorawanMac->SetMType (LorawanMacHeader::CONFIRMED_DATA_UP);
+
+            }
+
             lora_app->m_macHelper.SetSpreadingFactorsUp(lora_app->m_vehicles,lora_app->m_rspus,lora_app->m_loraChannel);
+            std::cout<<"Created the additioal nodes correctly /// /"<<std::endl;
+
             Time diff = Simulator::Now() - lora_app->broadcast_time;
             Time next_broad = lora_app->gw_next_broad.front();
             lora_app->gw_next_broad.pop();  
@@ -1577,15 +1711,19 @@ namespace ns3{
                 Simulator::Schedule(Seconds(50),&ns3::BroadcastGenerationCallback, Create<Packet>(project_pointer->m_packetSize),lora_app->m_rspus,true);
             }
         }
+        std::cout<<"Created the additioal nodes correctly /// /"<<std::endl;
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Process Outputs to Validate the Simulation ---//
     void DynamicGateway::ProcessOutputs(){
         NS_LOG_FUNCTION_NOARGS(); 
         LoraPacketTracker &tracker = lora_app->m_loraHelper.GetPacketTracker ();
-        
+        LoraPacketTracker &tracker1 = lora_app->m_critical_loraHelper.GetPacketTracker ();
 
-        if(!m_verbose){
+
+
+        if(m_verbose){
             std::cout<<"//<< Presenting the Results >>//";
             std::cout<<"The Events for node creation: "<<std::endl;
             if(m_additional_node_creation){
@@ -1601,7 +1739,7 @@ namespace ns3{
         uint32_t informed_eds = 0; 
         if(m_emergency){
             for(auto tupl : lora_app->EmergencyVector){
-                 if(!m_verbose){
+                 if(m_verbose){
                     std::cout<<"Event ID => " << get<0>(tupl)
                     << " | Number of Nodes In Danger => " << get<1>(tupl)
                     << " | Final number of Nodes Informed => " << get<2>(tupl) << std::endl;
@@ -1627,13 +1765,19 @@ namespace ns3{
         Count_Acc_EDs.push_back(lora_app->accepted_devices);
 
         tracker.PrintPhyPacketsPerGw(Seconds(0),Seconds(m_TotalSimTime), lora_app->m_rspus.Get(0)->GetId());
+        tracker1.PrintPhyPacketsPerGw(Seconds(0),Seconds(m_TotalSimTime), lora_app->m_rspus.Get(0)->GetId());
+
         std::cout<<"Total number of send and received packets (excluding broadcasts) :: " << tracker.CountMacPacketsGlobally(Seconds(0),Seconds(3600)) << std::endl;
+        std::cout<<"Total number of send and received packets (device 2) :: " << tracker1.CountMacPacketsGlobally(Seconds(0),Seconds(3600)) << std::endl;
+
         std::cout<<"The total Number of nodes given access to the network is => "<<lora_app->m_ns->GetNetworkStatus()->CountEndDevices()<<std::endl; 
         std::cout<<"The total number of nodes given access to the network is => "<<lora_app->accepted_devices << std::endl; 
         std::cout<<"The total Number of broadcasted packets provided by the NS is => " << lora_app->NS_success_broadcasts<<std::endl;
         std::cout<<"Gateway Finished receiving all available replies at => "<< lora_app->finished_gw_reception<<std::endl;
         std::cout<<"Sent  ||  Received   ||  Interfered  ||  No more receivers  ||  Under Sensitivity  ||  Lost Because Tx"<<std::endl;
         std::cout<<"Mac packets with ACK reached device => " << tracker.CountMacPacketsGloballyCpsr(Seconds(0),Seconds(m_TotalSimTime)) << std::endl;
+        std::cout<<"Mac packets with ACK reached device 2 => " << tracker1.CountMacPacketsGloballyCpsr(Seconds(0),Seconds(m_TotalSimTime)) << std::endl;
+
         std::cout<<"Count packets to evaluate the performance at PHY level of a specific gateway :: " << tracker.PrintPhyPacketsPerGw(Seconds(0),Seconds(3600),2) << std::endl;
         std::cout<<"Number of aknowledged devices is => " << lora_app->ACK_Devices.size() << std::endl;
         std::cout<<"The Total Number of destroyed packets due to interference for the GW | " << lora_app->lost_packets_due_Intf << " |" <<std::endl;
@@ -1642,7 +1786,7 @@ namespace ns3{
         std::cout<<"The Total Number of received ACK packets | " << lora_app->Correct_ED_ACK_receptions << " |"<<std::endl; 
         std::cout<<"The Total Number of Devices accepted in the Network when emergency occured | " << lora_app->EDs_in_NS_at_Emergency<< " |"<<std::endl;
         std::cout<<"The Total Number of Devices that were in danger when event occurred | " << lora_app->ED_in_danger_Emergency<< " |"<<std::endl;
-
+        std::cout<<"************************************************************************************************************************************************************"<<std::endl;
 
         std::string pdr_string2 = tracker.CountMacPacketsGloballyCpsr(Seconds(0),Seconds(m_TotalSimTime)); 
         std::stringstream ss2(pdr_string2);
@@ -1694,6 +1838,7 @@ namespace ns3{
         plot.GenerateOutput(plotFile); 
         plotFile.close(); 
         m_os.close(); //Close log file
+        NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Write results into a CSV file for further analysis ---//
@@ -1703,7 +1848,7 @@ namespace ns3{
         std::ofstream outputFile("LoRaApp_results.csv");
         if (outputFile.is_open()){
             outputFile << "GW-PDR,ED-PDR,PER,AC,IDEDs,InformedEDS\n";
-            if(!m_verbose){
+            if(m_verbose){
                 for(uint32_t szi=0; szi < Pdr_vector.size(); szi++){
                     outputFile<<Pdr_vector.at(szi)<<","<<Pdr_vector_eds.at(szi)<<","<<Per_vector.at(szi)<<","<<Count_Acc_EDs.at(szi)<<","<<get<0>(Regard_EM.at(szi))<<","<<get<1>(Regard_EM.at(szi))<<'\n';
                     std::cout<<"PDR for The GW ==> " << Pdr_vector.at(szi) <<" |"<<std::endl;
@@ -1712,7 +1857,7 @@ namespace ns3{
                     std::cout<<"Accepted Devices ==>" << Count_Acc_EDs.at(szi)<<std::endl; 
                     std::cout<<"Indangered Devices In Event ==> "<<get<0>(Regard_EM.at(szi))<<std::endl; 
                     std::cout<<"Actually Informed Devices ==> " << get<1>(Regard_EM.at(szi))<<std::endl;
-                    //std::cout<<"Total Number of Endangered Devices in Simulation ==> " << Count_Endangered.at(szi)<<std::endl;
+                    std::cout<<"Total Number of Endangered Devices in Simulation ==> " << Count_Endangered.at(szi)<<std::endl;
                 }
             }
             
@@ -1720,7 +1865,9 @@ namespace ns3{
         }else{
             std::cerr<<"Error opening the file.\n";
         }
+        //lora_app->m_loraHelper.PrintEndDevices(lora_app->m_vehicles,lora_app->m_rspus, "PrintEndDevices.dat"); 
     }
+    
 }
 
 int main (int argc, char* argv[]){
