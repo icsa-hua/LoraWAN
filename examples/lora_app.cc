@@ -64,7 +64,8 @@
 
 //--- Plots ---// 
 #include "ns3/gnuplot.h"
-
+#include "ns3/histogram.h"
+// #include "gnuplot-iostream.h"
 //---Basic C++ imports---//
 #include <random>
 #include <fstream>
@@ -78,6 +79,8 @@
 #include <queue>
 #include <set> 
 #include <chrono> 
+#include <algorithm> 
+
 
 using namespace ns3;
 using namespace lorawan; 
@@ -96,8 +99,10 @@ std::vector<double> PLR_GW;
 std::vector<double> PLR_ED; 
 std::vector<int> Count_Acc_EDs;
 std::vector<int> Count_Endangered;  
+std::vector<Time> OnAir; 
 int nSims;  
 std::vector<std::tuple<uint32_t,uint32_t>> Regard_EM; 
+std::vector<std::tuple<int,int,double, double>> SentByEDs; 
 ///RX_P : pending the RX state 
 ///TX_P : pending the TX state
 ///RX_F : finished the RX state
@@ -120,6 +125,7 @@ namespace ns3{
         std::set<LoraDeviceAddress> ACK_Queue; //Holds the remaining addresses to receive the ACK 
         std::set<LoraDeviceAddress> EmergencyQueue;
         std::map<LoraDeviceAddress, std::string> vehicles_States;
+        std::map<LoraDeviceAddress, std::string> prev_veh_States;
         std::vector<Address> gwAddresses_vec; 
         std::queue<uint32_t> phy_end_reception_count; 
         std::queue<bool> ignore_broadcast_nodes;
@@ -139,6 +145,7 @@ namespace ns3{
         double SimulationTime; //Time of Simulation. 
         int maxReceptionPaths; //number of maximum reception paths that the GW uses. (8) 
         Time broadcast_time; // Get the time that a br is executed. 
+        Time emergency_delay; 
         uint32_t applicable_nodes; // Number to hold the applicable devices as they are formed by the Subsets. 
         uint32_t stationary_nodes; 
         bool event_occurred;         
@@ -206,6 +213,7 @@ namespace ns3{
         :SimulationTime(3600.0), 
          maxReceptionPaths(8), 
          broadcast_time(Seconds(0)),
+         emergency_delay(Seconds(150)), 
          applicable_nodes(0), 
          stationary_nodes(2), 
          event_occurred(false), 
@@ -351,6 +359,10 @@ namespace ns3{
             lora_app->Correct_ACK_GW_transmissions++; 
         }
         lora_app->Correct_GW_DL_transmissions++; 
+        // LoraTxParameters txParams;
+        // txParams.sf = tag.GetSpreadingFactor();
+        // Time onair = lora_app->m_rspus.Get(0)->GetDevice(0)->GetObject<LoraNetDevice> () -> GetPhy() -> GetOnAirTime(myPacket,txParams); 
+        // OnAir.push_back(onair);
         //NS_LOG_FUNCTION_NOARGS(); 
         return;
  
@@ -387,7 +399,7 @@ namespace ns3{
     }
 
      void CreateSubsets(){
-        //NS_LOG_FUNCTION_NOARGS(); 
+        NS_LOG_FUNCTION_NOARGS(); 
         if(lora_app->excluded_nodes.size() != 0){lora_app->excluded_nodes.clear();} //Create a new excluded list due to movement and new addition of nodes. 
         lora_app->applicable_nodes = 0; //Value changes just like excluded_nodes. 
         //Function to create the subsets based on distance. 
@@ -416,23 +428,33 @@ namespace ns3{
             if(distance < 1000.0){
                 (subsets[0]).insert((*edNode));
                 lora_app->applicable_nodes++; 
-                edLorawanMac->SetDataRate(5); 
+                // edLorawanMac->SetDataRateAdaptation(true);
+                // edLorawanMac->SetDataRate(5); 
+                // edLorawanMac-> GetSfFromDataRate(5);
             }else if (distance >= 1000.0 && distance < 2400.0){
                 (subsets[1]).insert((*edNode));
                 lora_app->applicable_nodes++; 
-                edLorawanMac->SetDataRate(4);
+                // edLorawanMac->SetDataRateAdaptation(true);
+                // edLorawanMac->SetDataRate(4);
+                // edLorawanMac-> GetSfFromDataRate(4);
             }else if (distance >= 2400.0 && distance < 3800.0){
                 (subsets[2]).insert({*edNode});
                 lora_app->applicable_nodes++; 
-                edLorawanMac->SetDataRate(3);
+                // edLorawanMac->SetDataRateAdaptation(true);
+                // edLorawanMac->SetDataRate(3);
+                // edLorawanMac-> GetSfFromDataRate(3);
             }else if (distance >= 3800.0 && distance < 5200.0){
                 (subsets[3]).insert((*edNode));
                 lora_app->applicable_nodes++; 
-                edLorawanMac->SetDataRate(2);
+                // edLorawanMac->SetDataRateAdaptation(true);
+                // edLorawanMac->SetDataRate(2);
+                // edLorawanMac-> GetSfFromDataRate(2);
             }else if (distance >= 5200.0 && distance < 6400.0){
                 (subsets[4]).insert((*edNode));  
                 lora_app->applicable_nodes++;     
-                edLorawanMac->SetDataRate(0); 
+                // edLorawanMac->SetDataRateAdaptation(true);
+                // edLorawanMac->SetDataRate(0); 
+                // edLorawanMac-> GetSfFromDataRate(0);
             }else{
                 lora_app->excluded_nodes.push_back(*edNode); 
             }
@@ -590,6 +612,7 @@ namespace ns3{
     void GWReceptioOfReplyPacket (Ptr<Packet const> packet, uint32_t systemId){
         //Get the reply packet to register the address of the End Device.
         //NS_LOG_FUNCTION_NOARGS(); 
+        // std::cout<<"In GWReceptioOfReplyPacket"<<std::endl;
         lora_app->gw_systemId = systemId; 
         LorawanMacHeader mHdr;
         LoraFrameHeader fHdr;
@@ -602,6 +625,24 @@ namespace ns3{
         packet->PeekPacketTag(tag);
         lora_app->packetsReceived.at(tag.GetSpreadingFactor()-7)++; 
         lora_app->Correct_GW_UL_receptions++;
+        uint8_t tmp = tag.GetReceivePower();
+        if (tmp != 0){
+            tuple<int,int,double,double> tmp_tuple; 
+            tmp_tuple = make_tuple(unsigned(tag.GetSpreadingFactor()),unsigned(tag.GetDataRate()),(tag.GetReceivePower()),tag.GetFrequency());
+            SentByEDs.push_back(tmp_tuple);
+            // std::cout<<"Sent with SF --->> " << unsigned(tag.GetSpreadingFactor()) << std::endl;
+            // std::cout<<"Sent with DataRate --->> " << unsigned(tag.GetDataRate()) << std::endl;
+            // std::cout<<"Sent TX Power --->> " << (tag.GetReceivePower()) << std::endl;
+            // std::cout<<"Sent In frequency --->> " << tag.GetFrequency() << std::endl;
+            lora_app->Correct_ED_UL_transmissions++;
+
+        }
+        // LoraTxParameters txParams; 
+        // txParams.sf = tag.GetSpreadingFactor(); 
+        // Get The time of Air for the responses of the Eds. 
+        // Time onair = lora_app->m_rspus.Get(0)->GetDevice(0)->GetObject<LoraNetDevice> () -> GetPhy() -> GetOnAirTime(myPacket,txParams); 
+        // OnAir.push_back(onair); 
+
         if(lora_app->event_occurred && lora_app->m_flag == 1000){ 
             if(address == lora_app->sensor_Address){
                 NS_LOG_DEBUG("The sensor succesfully informed the GW at Frequency [ " << tag.GetFrequency() << " MHz]" );
@@ -644,9 +685,44 @@ namespace ns3{
                     lora_app->finished_gw_reception = Simulator::Now().GetSeconds();
                 }        
             }
-        }else if(endDeviceStatuses.find(address)!=endDeviceStatuses.end()){
-            //Received pkt from device that has access to net. 
-            //Ignore it 
+        }else{
+            //std::cout<<"R"<<std::endl;
+            if(lora_app->ACK_Devices.find(address)!=lora_app->ACK_Devices.end()){
+                Ptr<EndDeviceStatus> status = endDeviceStatuses[address];
+                Ptr<EndDeviceLorawanMac> edmac = status->GetMac(); 
+                Ptr<Packet> replypacket = status -> GetCompleteReplyPacket(); 
+                Ptr<ClassCEndDeviceLorawanMac> classC = edmac->GetObject<ClassCEndDeviceLorawanMac>(); 
+                // Ptr<LoraPhy> phy = edmac->GetPhy(); 
+                // if (phy -> GetObject<EndDeviceLoraPhy>() -> IsTransmitting()){
+                //     classC-> postponeTransmission(lora_app->emergency_delay,replypacket);
+                //     phy -> GetObject<EndDeviceLoraPhy>() -> SwitchToStandby(); 
+                // }
+
+                Ptr<NetDevice> netDevice = edmac->GetDevice();
+                Ptr<Node> ed = netDevice -> GetNode(); 
+                Ptr<PeriodicSender> app = ed->GetApplication(1)->GetObject<PeriodicSender>();
+                app->StopApplication(); 
+                // Simulator::Schedule(Seconds(60),[classC](){
+                //     classC -> OpenSecondReceiveWindow(false);
+                // });
+                lora_app->vehicles_States[address] = "RX_P";    
+
+            }
+            // }else if (endDeviceStatuses.find(address)!=endDeviceStatuses.end() && lora_app->ACK_Devices.find(address)==lora_app->ACK_Devices.end()){
+            //     // NS_LOG_FUNCTION("The device in here is not supported yet ?????? ");
+            //     // Ptr<EndDeviceStatus> status = endDeviceStatuses[address];
+            //     // Ptr<EndDeviceLorawanMac> edmac = status->GetMac(); 
+            //     // Ptr<NetDevice> netDevice = edmac->GetDevice();
+            //     // Ptr<Node> ed = netDevice -> GetNode(); 
+            //     // Ptr<PeriodicSender> app = ed->GetApplication(0)->GetObject<PeriodicSender>();
+            //     // app->StopApplication(); 
+            //     // std::cout<<"Gotten the end device status for Address :: " << address << std::endl;
+            //     // Ptr<ClassCEndDeviceLorawanMac> classC = edmac->GetObject<ClassCEndDeviceLorawanMac>(); 
+            //     // classC -> OpenSecondReceiveWindow(false);
+            //     // lora_app->vehicles_States[address] = "RX_P"; 
+            //     // std::cout<<"Gotten the end device status for Address :: " << address << std::endl;
+                
+            // }
             return; 
         }
         //NS_LOG_FUNCTION_NOARGS(); 
@@ -672,7 +748,8 @@ namespace ns3{
 
     //--- Successfull transmission of packet from the ED towards the GW ---//
     void EdDeviceSenttoPhyCallback (Ptr<const Packet> packet, uint32_t index) {
-        //NS_LOG_FUNCTION_NOARGS(); 
+        NS_LOG_FUNCTION_NOARGS(); 
+        // std::cout<<"In End Send " << std::endl;
         Ptr<Packet> packetCopy = packet->Copy();
         LoraTag tag;
         packet->PeekPacketTag(tag);
@@ -684,24 +761,28 @@ namespace ns3{
         packetCopy->RemoveHeader (fHdr);
         LoraDeviceAddress address = fHdr.GetAddress();
         // packet->PrintPacketTags();
-        uint8_t tmp = tag.GetReceivePower();
-        if (tmp != 0){
-            std::cout<<"Sent with SF --->> " << unsigned(tag.GetSpreadingFactor()) << std::endl;
-            std::cout<<"Sent with DataRate --->> " << unsigned(tag.GetDataRate()) << std::endl;
-            std::cout<<"Sent TX Power --->> " << (tag.GetReceivePower()) << std::endl;
-            std::cout<<"Sent In frequency --->> " << tag.GetFrequency() << std::endl;
-            lora_app->Correct_ED_UL_transmissions++;
+        // uint8_t tmp = tag.GetReceivePower();
+        // if (tmp != 0){
+        //     tuple<int,int,double,double> tmp_tuple; 
+        //     tmp_tuple = make_tuple(unsigned(tag.GetSpreadingFactor()),unsigned(tag.GetDataRate()),(tag.GetReceivePower()),tag.GetFrequency());
+        //     SentByEDs.push_back(tmp_tuple);
+        //     // std::cout<<"Sent with SF --->> " << unsigned(tag.GetSpreadingFactor()) << std::endl;
+        //     // std::cout<<"Sent with DataRate --->> " << unsigned(tag.GetDataRate()) << std::endl;
+        //     // std::cout<<"Sent TX Power --->> " << (tag.GetReceivePower()) << std::endl;
+        //     // std::cout<<"Sent In frequency --->> " << tag.GetFrequency() << std::endl;
+        //     lora_app->Correct_ED_UL_transmissions++;
 
-        }
-
+        // }
+        //std::cout<<"Sending Packet to GW at " << Simulator::Now().GetSeconds() << std::endl;
         //--- Update the state of the end Device ---//
         lora_app->vehicles_States[(address)] = "TX_F";
+        // std::cout<<"Out End Send " << std::endl;
         //NS_LOG_FUNCTION_NOARGS();
     }
 
     //--- Callback to handle the reception of packet send from the GW/NS to the ED ---//
     void CorrectReceptionEDCallback(Ptr<Packet const> packet, uint32_t recepientId){
-        //NS_LOG_FUNCTION_NOARGS(); 
+        NS_LOG_FUNCTION_NOARGS(); 
         Ptr<Packet> myPacket = packet->Copy();
         LorawanMacHeader mHdr;
         LoraFrameHeader fHdr;
@@ -709,13 +790,19 @@ namespace ns3{
         myPacket->RemoveHeader (mHdr);
         myPacket->RemoveHeader (fHdr);
         myPacket->PeekPacketTag(tag);
-
+        
         //Πάρε την θέση και τον κόμβο από τον αντίστοιχο container. 
         uint32_t tmp = recepientId-lora_app->stationary_nodes;
         Ptr<Node> cur_node = lora_app->m_vehicles.Get(tmp);
         LoraDeviceAddress addr = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>()->GetDeviceAddress(); 
 
         LoraDeviceAddress txAddress = fHdr.GetAddress();
+
+        LoraTxParameters txParams;
+        //txParams.sf = tag.GetSpreadingFactor();
+        Time onair = cur_node->GetDevice(0)->GetObject<LoraNetDevice> () -> GetPhy() -> GetOnAirTime(myPacket,txParams); 
+        OnAir.push_back(onair);
+        
 
         lora_app->phy_end_reception_count.push(tmp); //Take every node that receives a message. 
         lora_app->ignore_broadcast_nodes.push(true);
@@ -760,12 +847,40 @@ namespace ns3{
             }
 
         }else if(endDeviceStatuses.find(addr)!=endDeviceStatuses.end() && txAddress.IsBroadcast()){
+
             //Η συσκευή ανήκει στο δίκτυο και ελέγχουμε αν είναι στις συσκευές που κινδυνεύονυ και αν το μήνυμα είναι έκτακτο
             if(lora_app->EmergencyQueue.find(addr)!=lora_app->EmergencyQueue.end() && lora_app->event_occurred){
-                lora_app->ignore_broadcast_nodes.pop(); 
-                lora_app->ignore_broadcast_nodes.push(false); 
+                
+                if (lora_app->prev_veh_States.find(addr)!=lora_app->prev_veh_States.end()){
+                    std::string prev_state = lora_app->prev_veh_States[addr]; 
+                    if(prev_state.compare("TX_P") == 0 || prev_state.compare("TX_F") == 0 ){
+                        
+
+                        lora_app->vehicles_States[(addr)] = "TX_P";
+                    }else{
+                       lora_app->vehicles_States[(addr)] = "RX_F";  
+                    }
+                    lora_app->ignore_broadcast_nodes.pop(); 
+                    lora_app->ignore_broadcast_nodes.push(false);
+                }else{
+                    lora_app->vehicles_States[(addr)] = "RX_F"; 
+                    lora_app->ignore_broadcast_nodes.pop(); 
+                    lora_app->ignore_broadcast_nodes.push(false);
+                }
+            }else if(!lora_app->event_occurred && lora_app->ACK_Devices.find(addr)!=lora_app->ACK_Devices.end()){
+                std::string txstate = lora_app->vehicles_States[(addr)]; 
+                if(txstate.compare("TX_P") == 0 || txstate.compare("TX_F") == 0 ){
+                    //std::cout << "TX_sTATE ==>>  " << txstate << std::endl;
+                    lora_app->ignore_broadcast_nodes.pop(); 
+                    lora_app->ignore_broadcast_nodes.push(true);
+                }else{
+                    lora_app->vehicles_States[(addr)] = "RX_F";
+                    lora_app->ignore_broadcast_nodes.pop(); 
+                    lora_app->ignore_broadcast_nodes.push(false);  
+                }   
             }
-            //Αν όχι τότε αγνόησε το discovery Signal. 
+        
+        //Αν όχι τότε αγνόησε το discovery Signal. 
         }else if(txAddress==addr){ 
             //Αν το μήνυμα που έλαβε η συσκευή είναι το ACK Πακέτο για την ίδια την συσκευή. 
             auto ackqueue = lora_app->ACK_Queue.find(addr);
@@ -789,7 +904,7 @@ namespace ns3{
             lora_app->ACK_Devices.insert(addr);   
             lora_app->Correct_ED_DL_receptions++;
             lora_app->Correct_ED_ACK_receptions++; 
-            std::string current_state ("TX_F");
+            std::string current_state = lora_app->vehicles_States[addr];
 
             //Διέγραψε τη συσκευή από τις συσκευές που περιμένουν να λάβουν επιβεβαίωση και δεν είναι 
             auto remain = lora_app->remainingNodes.find(cur_node);
@@ -797,14 +912,19 @@ namespace ns3{
                 lora_app->remainingNodes.erase(remain); 
             }
 
-            if(current_state.compare(lora_app->vehicles_States[addr])==0){
+            if(current_state.compare(("TX_F"))==0  || current_state.compare(("RX_P"))==0 ){
                 Ptr<ClassCEndDeviceLorawanMac> classC = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<ClassCEndDeviceLorawanMac>(); 
                 classC -> OpenSecondReceiveWindow(false);
                 lora_app->vehicles_States[addr] = "RX_P";
+                Ptr<PeriodicSender> persender = cur_node->GetApplication(0)->GetObject<PeriodicSender>(); 
+                persender->StopApplication();
             }
 
-            Ptr<PeriodicSender> persender = cur_node->GetApplication(0)->GetObject<PeriodicSender>(); 
-            persender->StopApplication();    
+            // Ptr<ClassCEndDeviceLorawanMac> cmac = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<ClassCEndDeviceLorawanMac>(); 
+            // cmac -> SetMType(LorawanMacHeader::UNCONFIRMED_DATA_UP); 
+            // lora_app->perShot.SetPeriod(Seconds(300)); 
+            // lora_app->perShot.Install(cur_node);
+                
         }else if (txAddress!=addr){
             lora_app->Incorrect_ACK++; 
         }
@@ -812,12 +932,13 @@ namespace ns3{
 
     void CreateEventCallback(Ptr<Packet> packet){
         NS_LOG_FUNCTION_NOARGS();
+        std::cout<<"An emergency event id was triggered, sensor reacted to an abnormal activity! The size of the Emergency Queue is => " << lora_app->EmergencyQueue.size()<<std::endl;
         //Have a new remote node send an emergency message to the NS and the nerwork server replying to all the devices inside the network at that point in time 
         lora_app->emergency_time = Simulator::Now().GetSeconds(); 
         lora_app->event_occurred = true; 
 
         if(lora_app-> emergency_event_id < 1){
-            Count_Endangered.push_back(0);
+            //Count_Endangered.push_back(0);
             lora_app->emergency_event_id++; 
         }else if (lora_app->emergency_event_id >=1 ){
             lora_app->emergency_event_id+= 2;
@@ -845,27 +966,55 @@ namespace ns3{
         Ptr<MobilityModel> sensorMob = lora_app->sensorNode.Get(0)->GetObject<MobilityModel>();
         Ptr<NetworkStatus> net_status = lora_app->m_ns->GetNetworkStatus(); //Get the netStatus object to access information 
         std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> endDeviceStatuses = net_status->m_endDeviceStatuses; //Get the end device statuses that are in the network 
-        std::string vehicle_state ("RX_P");
+        //std::string vehicle_state ("TX_P");
+        
         for(auto endDevice : endDeviceStatuses){
+            std::string edstate = lora_app->vehicles_States[endDevice.first]; 
+            if (lora_app->prev_veh_States.find(endDevice.first) == lora_app->prev_veh_States.end()){
+                lora_app->prev_veh_States.insert(pair<LoraDeviceAddress, string>(endDevice.first,lora_app->vehicles_States[endDevice.first]));
+            }else{
+                lora_app->prev_veh_States[endDevice.first] = lora_app->vehicles_States[endDevice.first];
+            }
             if(endDevice.first == lora_app->sensor_Address ){continue;} // Do'not include the sensor in the emergency message. 
-            
             Ptr<EndDeviceLorawanMac> edmac = endDevice.second ->GetMac()->GetObject<EndDeviceLorawanMac>(); 
             Ptr<NetDevice> net = edmac->GetDevice();
             Ptr<Node> node = net->GetNode();
             Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac() ->GetObject<ClassCEndDeviceLorawanMac>();
-            if((vehicle_state.compare(lora_app->vehicles_States[endDevice.first]))!=0){
-                edLorawanMac ->OpenSecondReceiveWindow(false);
-                lora_app->vehicles_States[endDevice.first] = "RX_P";
-            }
-
             double distance = sensorMob->GetDistanceFrom(node->GetObject<MobilityModel>()); // Check the distance between sensor and the vehicles.             
             if(distance<=2400.0){
                 lora_app->EmergencyQueue.insert(endDevice.first);
                 lora_app->ED_in_danger_Emergency++;
             }
+
+            if ((edstate.compare("TX_P")==0 || edstate.compare("TX_F")==0) && (lora_app->ACK_Devices.find(endDevice.first) != lora_app->ACK_Devices.end())){
+                Ptr<EndDeviceStatus> status = endDeviceStatuses[endDevice.first];
+                Ptr<EndDeviceLorawanMac> edmac = status->GetMac()->GetObject<EndDeviceLorawanMac>();
+                Ptr<LoraPhy> phy = edmac->GetPhy(); 
+                Ptr<Packet> replypacket = status -> GetCompleteReplyPacket(); 
+                Ptr<ClassCEndDeviceLorawanMac> classC = status -> GetMac() ->GetObject<ClassCEndDeviceLorawanMac>();
+                if (phy -> GetObject<EndDeviceLoraPhy>() -> IsTransmitting()){
+                    std::cout << " REPLRRR ARGGGGGG GRAAAAAA RARAGAGARARA"<< std::endl;
+
+                    classC-> postponeTransmission(lora_app->emergency_delay,replypacket);
+                    phy -> GetObject<EndDeviceLoraPhy>() -> SwitchToStandby(); 
+                }
+                std::cout<<"Emergency inside the loop for devices "<<std::endl;
+                classC-> OpenSecondReceiveWindow(false);
+                continue; 
+            }
+
+            edLorawanMac ->OpenSecondReceiveWindow(false);
+            lora_app->vehicles_States[endDevice.first] = "RX_P";
+            
+            // if((vehicle_state.compare(lora_app->vehicles_States[endDevice.first]))!=0){
+            //     edLorawanMac ->OpenSecondReceiveWindow(false);
+            //     lora_app->vehicles_States[endDevice.first] = "RX_P";
+            // }
+            // edLorawanMac -> OpenSecondReceiveWindow(false);
+            // lora_app->vehicles_States[endDevice.first] = "RX_P";
         }
 
-        Count_Endangered.at(nSims) =  Count_Endangered.at(nSims) + (lora_app->ED_in_danger_Emergency);
+        //Count_Endangered.at(nSims) =  Count_Endangered.at(nSims) + (lora_app->ED_in_danger_Emergency);
         lora_app->perShot.SetPeriod(Seconds(10)); //Periodically send a message into the gateway.  
         lora_app->perShot.SetPacketSize(10); 
         lora_app->perShot.Install(lora_app->sensorNode);
@@ -873,13 +1022,12 @@ namespace ns3{
         app->StartApplication(); 
 
         lora_app->EDs_in_NS_at_Emergency = lora_app->m_ns->GetNetworkStatus()->CountEndDevices();
-        std::cout<<"An emergency event id was triggered, sensor reacted to an abnormal activity! The size of the Emergency Queue is => " << lora_app->EmergencyQueue.size()<<std::endl;
         NS_LOG_FUNCTION_NOARGS(); 
     }
 
     //--- Callback Function to handle the GW broadcast towards the end devices ---//
     void BroadcastGenerationCallback(Ptr<Packet> data, NodeContainer gateway, bool autonomousGW){
-        //NS_LOG_FUNCTION_NOARGS(); 
+        NS_LOG_FUNCTION_NOARGS(); 
 
         //Diference in these other than that in the first the GW alone decides to sent the echo packet ,is the waiting time. 
         //In the first method the waiting time approaches values greater than 10s. However on the Second it is 0s. This is not what really happens. 
@@ -943,13 +1091,15 @@ namespace ns3{
 
     void CorrectReceptionMACCallback(Ptr<Packet const> packet){
         
-        //NS_LOG_FUNCTION_NOARGS();
+        NS_LOG_FUNCTION_NOARGS();
         Ptr<Packet> myPacket = packet->Copy();
         LorawanMacHeader mHdr;
         LoraFrameHeader fHdr;
+        LoraTag tag; 
         fHdr.SetAsDownlink(); 
         myPacket->RemoveHeader (mHdr);
         myPacket->RemoveHeader (fHdr);
+        myPacket->RemovePacketTag(tag); 
         LoraDeviceAddress txAddress = fHdr.GetAddress();
         
         uint32_t iter = lora_app->phy_end_reception_count.front(); //Iter =  recepientId - stationary nodes. 
@@ -969,7 +1119,7 @@ namespace ns3{
             return; 
         }
         if(!txAddress.IsBroadcast() && txAddress==addr){
-            //An acknowledgement packet was received. 
+            //An acknowledgement packet was received
             return; 
         }else if (!txAddress.IsBroadcast() && txAddress!=addr){
             return; 
@@ -991,49 +1141,95 @@ namespace ns3{
                 }
                 
             }else{
-                //No emergency has happened and broadcast received because device was in range. 
-                std::string vehicle_state ("RX_F"); 
-                if((vehicle_state.compare(lora_app->vehicles_States[addr]))==0){
-                    Ptr<EndDeviceLorawanMac> edMacWan = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>(); 
-                    Ptr<EndDeviceStatus> edstatus = CreateObject<EndDeviceStatus>(addr,edMacWan);
-                    lora_app->m_endDeviceStatuses.insert(pair<LoraDeviceAddress, Ptr<EndDeviceStatus>>(addr,edstatus)); 
-                    Address gwAddress = (lora_app->m_gatewayStatuses.begin()->first);
-                    if(!lora_app->m_gatewayStatuses.empty()){lora_app->m_gatewayStatuses.erase(lora_app->m_gatewayStatuses.begin()->first);}
-                    edstatus->InsertReceivedPacket(packet, gwAddress);
-                    lora_app->vehicles_States[(addr)] = "TX_P";
-                }    
-
-                if(lora_app->m_endDeviceStatuses.size() == lora_app->applicable_nodes){
-                    //If all available devices have received the echo message then start sending. 
-                    uint32_t subsetIdx = 0; 
-                    Time delay_time = Seconds(0); 
-                    while(subsetIdx != lora_app->Subsets.size()){
-                        int numReplies = std::min(lora_app->maxReceptionPaths, static_cast<int>(lora_app->Subsets[subsetIdx].size()));
-                        std::set<Ptr<Node>> temporary_set = lora_app->Subsets[subsetIdx];
-                        for(auto edNode : temporary_set){
-                            if(numReplies > 0 ){
-                                Ptr<LorawanMac> m_mac = (*edNode).GetDevice(0)->GetObject<LoraNetDevice>()->GetMac(); 
-                                Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = m_mac->GetObject<ClassCEndDeviceLorawanMac>(); 
-                                edLorawanMac -> SetMType(LorawanMacHeader::CONFIRMED_DATA_UP); 
-                                Simulator::Schedule((delay_time),[edNode](){
-                                    lora_app->perShot.SetPeriod(Seconds(lora_app->SimulationTime/36)); 
-                                    lora_app->perShot.Install(edNode);
-                                    Ptr<PeriodicSender> app = edNode->GetApplication(0)->GetObject<PeriodicSender>();
-                                    app->StartApplication(); 
-                                }); 
-
-                                delay_time +=  MilliSeconds(100); 
-                                --numReplies; 
-                                auto posi =  lora_app->Subsets[subsetIdx].find(edNode); 
-                                lora_app->Subsets[subsetIdx].erase(posi);
+                Ptr<NetworkStatus> net_status = lora_app->m_ns->GetNetworkStatus(); //Get the netStatus object to access information 
+                std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>> endDeviceStatuses = net_status->m_endDeviceStatuses;
+                if(endDeviceStatuses.find(addr)!=endDeviceStatuses.end()){
+                    std::string vehicle_state ("RX_F"); 
+                    if((vehicle_state.compare(lora_app->vehicles_States[addr]))==0){
+                        if (lora_app->ACK_Devices.find(addr)!=lora_app->ACK_Devices.end()){
+                            Ptr<EndDeviceLorawanMac> edMacWan = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>(); 
+                            Ptr<EndDeviceStatus> edstatus = CreateObject<EndDeviceStatus>(addr,edMacWan);
+                            Address gwAddress = (lora_app->m_gatewayStatuses.begin()->first);
+                            
+                            if(!lora_app->m_gatewayStatuses.empty()){lora_app->m_gatewayStatuses.erase(lora_app->m_gatewayStatuses.begin()->first);}
+                            edstatus->InsertReceivedPacket(packet, gwAddress);
+                            lora_app->vehicles_States[(addr)] = "TX_P";
+                            Ptr<LorawanMac> m_mac = (cur_node)->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac(); 
+                            Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = m_mac->GetObject<ClassCEndDeviceLorawanMac>(); 
+                            edLorawanMac -> SetMType(LorawanMacHeader::UNCONFIRMED_DATA_UP); 
+                            //edLorawanMac -> SetMType(LorawanMacHeader::CONFIRMED_DATA_UP); //Σκάει και με τα δύο. 
+                            // Ptr<PeriodicSender> app = cur_node->GetApplication(0)->GetObject<PeriodicSender>();
+                            // app->StopApplication(); 
+                            
+                            std::cout<<"Number of Applications " << cur_node->GetNApplications() << std::endl;
+                            if(cur_node->GetNApplications()== 2){
+                                Ptr<PeriodicSender> app = cur_node->GetApplication(1)->GetObject<PeriodicSender>();
+                                app->StartApplication();
+                            }else{
+                                lora_app->perShot.SetPeriod(Seconds(250)); 
+                                lora_app->perShot.Install(cur_node);
+                                Ptr<PeriodicSender> app = cur_node->GetApplication(1)->GetObject<PeriodicSender>();
+                                app->StartApplication();
                             }
-                        }
-                        if (lora_app->Subsets[subsetIdx].empty()){
-                            delay_time += Seconds(subsetIdx*5); 
-                            subsetIdx++; 
+                            
+                            // Simulator::Schedule(Seconds(5),[cur_node](){
+                            //     Ptr<PeriodicSender> app = cur_node->GetApplication(0)->GetObject<PeriodicSender>();
+                            //     app->StopApplication(); 
+                            //     lora_app->perShot.SetPeriod(Seconds(250)); 
+                            //     lora_app->perShot.Install(cur_node);
+                            //     std::cout<<"Number of Applications " << cur_node->GetNApplications() << std::endl;
+
+                            //     app = cur_node->GetApplication(1)->GetObject<PeriodicSender>();
+                            //     app->StartApplication(); 
+                            // }); 
                         }
                     }
-                }   
+                }else{
+                    //No emergency has happened and broadcast received because device was in range. 
+                    std::string vehicle_state ("RX_F"); 
+                    if((vehicle_state.compare(lora_app->vehicles_States[addr]))==0){
+                        Ptr<EndDeviceLorawanMac> edMacWan = cur_node->GetDevice(0)->GetObject<LoraNetDevice>()->GetMac()->GetObject<EndDeviceLorawanMac>(); 
+                        Ptr<EndDeviceStatus> edstatus = CreateObject<EndDeviceStatus>(addr,edMacWan);
+                        lora_app->m_endDeviceStatuses.insert(pair<LoraDeviceAddress, Ptr<EndDeviceStatus>>(addr,edstatus)); 
+                        Address gwAddress = (lora_app->m_gatewayStatuses.begin()->first);
+                        if(!lora_app->m_gatewayStatuses.empty()){lora_app->m_gatewayStatuses.erase(lora_app->m_gatewayStatuses.begin()->first);}
+                        edstatus->InsertReceivedPacket(packet, gwAddress);
+                        lora_app->vehicles_States[(addr)] = "TX_P";
+                    }    
+
+                    if(lora_app->m_endDeviceStatuses.size() == lora_app->applicable_nodes){
+                        //If all available devices have received the echo message then start sending. 
+                        uint32_t subsetIdx = 0; 
+                        Time delay_time = Seconds(0); 
+                        while(subsetIdx != lora_app->Subsets.size()){
+                            int numReplies = std::min(lora_app->maxReceptionPaths, static_cast<int>(lora_app->Subsets[subsetIdx].size()));
+                            std::set<Ptr<Node>> temporary_set = lora_app->Subsets[subsetIdx];
+                            for(auto edNode : temporary_set){
+                                if(numReplies > 0 ){
+                                    Ptr<LorawanMac> m_mac = (*edNode).GetDevice(0)->GetObject<LoraNetDevice>()->GetMac(); 
+                                    Ptr<ClassCEndDeviceLorawanMac> edLorawanMac = m_mac->GetObject<ClassCEndDeviceLorawanMac>(); 
+                                    edLorawanMac -> SetMType(LorawanMacHeader::CONFIRMED_DATA_UP); 
+                                    Simulator::Schedule((delay_time),[edNode](){
+                                        lora_app->perShot.SetPeriod(Seconds(lora_app->SimulationTime/36)); 
+                                        lora_app->perShot.Install(edNode);
+                                        Ptr<PeriodicSender> app = edNode->GetApplication(0)->GetObject<PeriodicSender>();
+                                        app->StartApplication(); 
+                                    }); 
+
+                                    delay_time +=  MilliSeconds(100); 
+                                    --numReplies; 
+                                    auto posi =  lora_app->Subsets[subsetIdx].find(edNode); 
+                                    lora_app->Subsets[subsetIdx].erase(posi);
+                                }
+                            }
+
+                            if (lora_app->Subsets[subsetIdx].empty()){
+                                delay_time += Seconds(subsetIdx*5); 
+                                subsetIdx++; 
+                            }
+                        }
+                    }
+                }       
             }
         }
         //NS_LOG_FUNCTION_NOARGS();
@@ -1205,7 +1401,7 @@ namespace ns3{
         //LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
         //LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
         //LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
-        LogComponentEnable("ClassCEndDeviceLorawanMac", LOG_LEVEL_ALL);
+        //LogComponentEnable("ClassCEndDeviceLorawanMac", LOG_LEVEL_ALL);
         //LogComponentEnable("OneShotSender", LOG_LEVEL_ALL);
         //LogComponentEnable("Ns2MobilityHelper", LOG_LEVEL_DEBUG); 
         //LogComponentEnable("LoraPacketTracker", LOG_LEVEL_ALL);
@@ -1645,6 +1841,12 @@ namespace ns3{
         
         //--- Initial Broadcast to get the initial nodes of the network ---//
         Simulator::Schedule(Seconds(3), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
+        Simulator::Schedule(Seconds(600), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
+        Simulator::Schedule(Seconds(1200), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
+        Simulator::Schedule(Seconds(1800), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
+        Simulator::Schedule(Seconds(2400), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
+        Simulator::Schedule(Seconds(3000), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
+        Simulator::Schedule(Seconds(3600), &ns3::BroadcastGenerationCallback, Create<Packet>(m_packetSize),lora_app->m_rspus,true);
 
         if(m_emergency){
             std::random_device rd; 
@@ -1867,8 +2069,8 @@ namespace ns3{
         }
 
         PDR_GW.push_back(pdrs_val[1]/pdrs_val[0]);
-        
-        PER_ED.push_back(lora_app->Incorrect_ACK/pdrs_val[0]); 
+        PLR_GW.push_back(1-(pdrs_val[1]/pdrs_val[0]));
+        PER_GW.push_back(tracker.CountPhyPacketsPerGw(Seconds(0),Seconds(3600),1)[2]/pdrs_val[0]);
         Count_Acc_EDs.push_back(lora_app->accepted_devices);
 
         std::cout<<"Total number of sent UL packets from EDs :: " << lora_app->Correct_ED_UL_transmissions<< std::endl;
@@ -1898,7 +2100,8 @@ namespace ns3{
         std::cout<<"No More Gw Packets (Device[2]): " << tracker1.CountPhyPacketsPerGw(Seconds(0),Seconds(3600),1)[3] << std::endl;
         std::cout<<"Under Sensitivity Packets (Device[1]): " << tracker.CountPhyPacketsPerGw(Seconds(0),Seconds(3600),1)[4] << std::endl;
         std::cout<<"Under Sensitivity Packets (Device[2]): " << tracker1.CountPhyPacketsPerGw(Seconds(0),Seconds(3600),1)[4] << std::endl;
-
+        std::cout<<"Lost Because No TX (Device[1]): " << tracker.CountPhyPacketsPerGw(Seconds(0),Seconds(3600),1)[5] << std::endl;
+        std::cout<<"Lost Because No TX (Device[2]): " << tracker1.CountPhyPacketsPerGw(Seconds(0),Seconds(3600),1)[5] << std::endl;
 
         //Πόσες συσκευές έγιναν αποδεκτές στο δίκτυο 2 μετρικές 
         std::cout<<"Total Number of Accepted Nodes based on Network Status => "<<lora_app->m_ns->GetNetworkStatus()->CountEndDevices()<<std::endl; 
@@ -1930,9 +2133,9 @@ namespace ns3{
                 pdr_eds.push_back(stod(word)); 
                 //std::cout<<""<<word<<std::endl;
             }
-
         PDR_ED.push_back(pdr_eds[1]/pdr_eds[0]);
-    
+        PLR_ED.push_back(1-(pdr_eds[1]/pdr_eds[0]));
+        PER_ED.push_back(lora_app->Incorrect_ACK/pdrs_val[0]); 
         
         Gnuplot plot(graphicsFileName);
         // Instantiate the plot and set its title.
@@ -1980,24 +2183,29 @@ namespace ns3{
     void DynamicTransmissions::WriteCsvHeader(){
         NS_LOG_FUNCTION_NOARGS(); 
 
-        std::ofstream outputFile("LoRaApp_results.csv");
+        std::ofstream outputFile("LoRaApp_outputs.csv");
         if (outputFile.is_open()){
             outputFile << "PDR-GW,PLR-GW,PER_GW,PDR-ED,PLR-ED,PER_ED,AC,IDEDs,InformedEDS\n";
+            
             for(uint32_t szi=0; szi < PDR_GW.size(); szi++){
-                //PLR_GW.push_back(1-PDR_GW.at(szi));
-                //PLR_ED.push_back(1-PDR_ED.at(szi));
-
-
-                //outputFile<<PDR_GW.at(szi)<<","<< PLR_GW.at(szi) <<","<< PER_GW.at(szi)<<","<<PDR_ED.at(szi)<<","<< PLR_ED.at(szi)<<","<<PER_ED.at(szi)<<","<<Count_Acc_EDs.at(szi)<<","<<get<0>(Regard_EM.at(szi))<<","<<get<1>(Regard_EM.at(szi))<<'\n';
-                // std::cout<<"| PDR for The GW => " << PDR_GW.at(szi) <<" |"<<std::endl;
-                // std::cout<<"| PLR for the GW => " << PLR_GW.at(szi) <<" |"<<std::endl;
-                // std::cout<<"| PER for the GW => " << PER_GW.at(szi) <<" |"<<std::endl;
-                // std::cout<<"| PDR for The EDs => " << PDR_ED.at(szi) <<" |"<<std::endl;
-                // std::cout<<"| PLR for the EDs => " << PLR_ED.at(szi) <<" |"<<std::endl;
-                // std::cout<<"| PER for the ED => " << PER_ED.at(szi) << " |"<<std::endl;
-                // std::cout<<"Accepted Devices in Network =>" << Count_Acc_EDs.at(szi)<<std::endl; 
-                // std::cout<<"Indangered Devices In Event => "<<get<0>(Regard_EM.at(szi))<<std::endl; 
-                // std::cout<<"Informed Endangered Devices => " << get<1>(Regard_EM.at(szi))<<std::endl;
+                outputFile << PDR_GW.at(szi) <<","
+                           << PLR_GW.at(szi) <<","
+                           << PER_GW.at(szi) <<","
+                           << PDR_ED.at(szi) <<","
+                           << PLR_ED.at(szi) <<","
+                           << PER_ED.at(szi) <<","
+                           << Count_Acc_EDs.at(szi) <<","
+                           << get<0>(Regard_EM.at(szi)) <<","
+                           << get<1>(Regard_EM.at(szi)) <<'\n';
+                std::cout<<"| PDR for The GW => " << PDR_GW.at(szi) <<" |"<<std::endl;
+                std::cout<<"| PLR for the GW => " << PLR_GW.at(szi) <<" |"<<std::endl;
+                std::cout<<"| PER for the GW => " << PER_GW.at(szi) <<" |"<<std::endl;
+                std::cout<<"| PDR for The EDs => " << PDR_ED.at(szi) <<" |"<<std::endl;
+                std::cout<<"| PLR for the EDs => " << PLR_ED.at(szi) <<" |"<<std::endl;
+                std::cout<<"| PER for the ED => " << PER_ED.at(szi) << " |"<<std::endl;
+                std::cout<<"Accepted Devices in Network =>" << Count_Acc_EDs.at(szi)<<std::endl; 
+                std::cout<<"Indangered Devices In Event => "<<get<0>(Regard_EM.at(szi))<<std::endl; 
+                std::cout<<"Informed Endangered Devices => " << get<1>(Regard_EM.at(szi))<<std::endl;
                 //std::cout<<"Total Number of Endangered Devices => " << Count_Endangered.at(szi)<<std::endl;   
             }
             outputFile.close();
@@ -2032,6 +2240,17 @@ int main (int argc, char* argv[]){
     }
 
     int repetitions = nSims; 
+    std::string originalString = "set xrange [0:50]";
+    std::string counterString = std::to_string(nSims);
+    size_t position = originalString.find(":50"); 
+    if(position == std::string::npos){
+        std::cerr <<"Something went Wrong." << std::endl;
+        return 1; 
+    }
+
+
+    std::string filteredString = originalString.substr(0,position) + ":" + counterString +"]"; 
+
     std::string fileNameWithNoExtension("PDR-plot2d");
     std::string graphicsFileName;
     std::string plotFileName;
@@ -2039,13 +2258,26 @@ int main (int argc, char* argv[]){
     graphicsFileName =  fileNameWithNoExtension + ".png";
     plotFileName = fileNameWithNoExtension + ".plt";
 
-    Gnuplot gnuplot = Gnuplot("channels.eps");
+    Gnuplot PDR_PER_PLR_EDs("PDR_PER_PLR_EDs.png");
+    PDR_PER_PLR_EDs.SetTitle("PDR - PER - PLR (EDs)"); 
+    PDR_PER_PLR_EDs.SetTerminal("png"); 
+    PDR_PER_PLR_EDs.SetLegend("Simulation ID" , "PDR/PER/PLR"); 
+    PDR_PER_PLR_EDs.AppendExtra(filteredString); 
+    PDR_PER_PLR_EDs.AppendExtra("set yrange [0:1]"); 
 
-    Gnuplot plot(graphicsFileName);
-    plot.SetTitle(plotTitle); 
+    Gnuplot gnuplot = Gnuplot("channels.eps");
+    gnuplot.SetTitle("EPS channels"); 
+    gnuplot.SetTerminal("png"); 
+    gnuplot.SetLegend("Simulation ID" , "PDR/PER/PLR"); 
+    gnuplot.AppendExtra(filteredString); 
+    gnuplot.AppendExtra("set yrange [0:1]"); 
+ 
+    Gnuplot plot("PDR_PER_PLR_GW.png");
+    plot.SetTitle("PDR - PER - PLR (GW)"); 
     plot.SetTerminal("png"); 
-    plot.SetLegend("Simulation ID" , "PDR / PER%"); 
-    plot.AppendExtra("set xrange [0:+10]"); 
+    plot.SetLegend("Simulation ID" , "PDR/PER/PLR"); 
+    plot.AppendExtra(filteredString); 
+    plot.AppendExtra("set yrange [0:1]"); 
 
     Gnuplot2dDataset dataset;   
     dataset.SetTitle("PDR-GW"); 
@@ -2063,19 +2295,19 @@ int main (int argc, char* argv[]){
     dataset3.SetErrorBars(Gnuplot2dDataset::XY); 
 
     Gnuplot2dDataset dataset4; 
-    dataset3.SetTitle("PER-EDs"); 
-    dataset3.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
-    dataset3.SetErrorBars(Gnuplot2dDataset::XY); 
+    dataset4.SetTitle("PER-EDs"); 
+    dataset4.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
+    dataset4.SetErrorBars(Gnuplot2dDataset::XY); 
     
     Gnuplot2dDataset dataset5; 
-    dataset3.SetTitle("PLR-GW"); 
-    dataset3.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
-    dataset3.SetErrorBars(Gnuplot2dDataset::XY); 
+    dataset5.SetTitle("PLR-GW"); 
+    dataset5.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
+    dataset5.SetErrorBars(Gnuplot2dDataset::XY); 
 
     Gnuplot2dDataset dataset6; 
-    dataset3.SetTitle("PLR-EDs"); 
-    dataset3.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
-    dataset3.SetErrorBars(Gnuplot2dDataset::XY); 
+    dataset6.SetTitle("PLR-EDs"); 
+    dataset6.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
+    dataset6.SetErrorBars(Gnuplot2dDataset::XY); 
     
     Ptr<DynamicTransmissions> experiment; 
 
@@ -2131,7 +2363,7 @@ int main (int argc, char* argv[]){
     std::cout << "Simulation took " << duration.count() << " seconds." << std::endl;
     
     double x; 
-    double xErrorDelta; 
+    double xErrorDelta1,xErrorDelta2,xErrorDelta3,xErrorDelta4,xErrorDelta5,xErrorDelta6; 
     double y_pdr_gw,y_pdr_ed,y_per_gw,y_per_ed,y_plr_gw,y_plr_ed;
     double yErrorDelta1, yErrorDelta2, yErrorDelta3,yErrorDelta4, yErrorDelta5, yErrorDelta6; 
 
@@ -2143,7 +2375,14 @@ int main (int argc, char* argv[]){
         y_per_ed = PER_ED.at(x);
         y_plr_gw = PLR_GW.at(x); 
         y_plr_ed = PLR_ED.at(x);
-        xErrorDelta = 0.05;
+
+        xErrorDelta1 = 0.05;
+        xErrorDelta2 = 0.05;
+        xErrorDelta3 = 0.05;
+        xErrorDelta4 = 0.05;
+        xErrorDelta5 = 0.05;
+        xErrorDelta6 = 0.05;
+
         yErrorDelta1 = 0.05 * y_pdr_gw;
         yErrorDelta2 = 0.05 * y_pdr_ed;
         yErrorDelta3 = 0.05 * y_per_gw;
@@ -2151,31 +2390,39 @@ int main (int argc, char* argv[]){
         yErrorDelta5 = 0.05 * y_plr_gw;
         yErrorDelta6 = 0.05 * y_plr_ed;
 
-        dataset.Add(x,y_pdr_gw,xErrorDelta,yErrorDelta1); 
-        dataset2.Add(x,y_pdr_ed,xErrorDelta,yErrorDelta2); 
-        dataset3.Add(x,y_per_gw,xErrorDelta,yErrorDelta3);
-        dataset4.Add(x,y_per_ed,xErrorDelta,yErrorDelta4);
-        dataset5.Add(x,y_plr_gw,xErrorDelta,yErrorDelta5);
-        dataset6.Add(x,y_plr_ed,xErrorDelta,yErrorDelta6);
+        dataset.Add (x,y_pdr_gw,xErrorDelta1,yErrorDelta1); 
+        dataset2.Add(x,y_pdr_ed,xErrorDelta2,yErrorDelta2); 
+        dataset3.Add(x,y_per_gw,xErrorDelta3,yErrorDelta3);
+        dataset4.Add(x,y_per_ed,xErrorDelta4,yErrorDelta4);
+        dataset5.Add(x,y_plr_gw,xErrorDelta5,yErrorDelta5);
+        dataset6.Add(x,y_plr_ed,xErrorDelta6,yErrorDelta6);
     }
 
+    std::cout << " setting Plot" << std::endl;
 
     plot.AddDataset(dataset);
-    plot.AddDataset(dataset2); 
+    PDR_PER_PLR_EDs.AddDataset(dataset2); 
     plot.AddDataset(dataset3);
-    plot.AddDataset(dataset4);
+    PDR_PER_PLR_EDs.AddDataset(dataset4);
     plot.AddDataset(dataset5); 
-    plot.AddDataset(dataset6);
+    PDR_PER_PLR_EDs.AddDataset(dataset6);
+
     std::ofstream plotFile(plotFileName); 
     plot.GenerateOutput(plotFile); 
     plotFile.close(); 
     
+    std::ofstream pdr_per_eds("PDR_PER_PLR_EDs.plt"); 
+    PDR_PER_PLR_EDs.GenerateOutput(pdr_per_eds); 
+    pdr_per_eds.close(); 
+    
+
     gnuplot.AddDataset(dataset);
     gnuplot.AddDataset(dataset2);
     gnuplot.AddDataset(dataset3);
     gnuplot.AddDataset(dataset4);
     gnuplot.AddDataset(dataset5);
     gnuplot.AddDataset(dataset6);
+    
     std::ofstream plotFile2("gnuplotEx.plt"); 
     gnuplot.GenerateOutput(plotFile2); 
     plotFile2.close(); 
@@ -2186,12 +2433,183 @@ int main (int argc, char* argv[]){
     PER_GW.clear(); 
     PLR_GW.clear(); 
     PLR_ED.clear(); 
+ 
 
-    Count_Acc_EDs.clear(); 
-    Count_Endangered.clear(); 
-    Regard_EM.clear(); 
+    struct packetInfo{
+        double timeOnAir; 
+        int sf; 
+    };
+
+    Gnuplot2dDataset onair_df;
+    onair_df.SetTitle("OnAir Time(s)"); 
+    onair_df.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+    Gnuplot2dDataset hist_df7;
+    hist_df7.SetTitle("ToA(s) SF=7"); 
+    hist_df7.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
+    Gnuplot2dDataset hist_df8;
+    hist_df8.SetTitle("ToA(s) SF=8"); 
+    hist_df8.SetStyle(Gnuplot2dDataset::LINES_POINTS); 
+    Gnuplot2dDataset hist_df12;
+    hist_df12.SetTitle("ToA(s) SF=12"); 
+    hist_df12.SetStyle(Gnuplot2dDataset::LINES_POINTS);  
+    double counter=0.0; 
     
-    std::cout<<"Execution of program finished with a total of " << repetitions << " repetitions. Closing simulation..." <<std::endl;
+    std::vector<packetInfo> packetData;
+    std::map<double, int> airTimeCounts;
+
+    for(auto t : OnAir){
+        airTimeCounts[t.GetSeconds()]++; 
+    }
+
+    for(auto item : airTimeCounts){
+        if(item.first==0.025856){
+            hist_df7.Add(item.first,0);
+            hist_df7.Add(item.first,item.second);
+        }else if(item.first == 0.041216){
+            hist_df8.Add(item.first,0);
+            hist_df8.Add(item.first,item.second);
+        }else if(item.first == 0.097536){
+            hist_df12.Add(item.first,0);
+            hist_df12.Add(item.first,item.second);
+        }
+    }
+
+    // int total_packets = 0; 
+    // double total_time = 0; 
+
+    // for(auto const& [time, count] : airTimeCounts){
+    //     int sf = -1;
+    //     if(time ==0.097536) sf = 12; 
+    //     else if(time == 0.041216) sf = 8; 
+    //     else if(time == 0.025856) sf = 7; 
+
+    // }
+
+    Histogram hgm = Histogram(); 
+    for(auto airtime: OnAir){
+        if (airtime.GetSeconds()==0.097536){
+            packetData.push_back({airtime.GetSeconds(), 12}); 
+        }else if(airtime.GetSeconds()==0.041216){
+            packetData.push_back({airtime.GetSeconds(), 8}); 
+        }else if(airtime.GetSeconds()==0.025856){
+            packetData.push_back({airtime.GetSeconds(), 7}); 
+        }
+        hgm.AddValue(airtime.GetSeconds()); 
+        onair_df.Add(counter, airtime.GetSeconds()); 
+        counter++; 
+    }
+
+    std::string pk_counter = std::to_string(counter); 
+    std::string ft_string = originalString.substr(0,position) + ":" + pk_counter+"]"; 
+    std::cout<<"Counter reached " << counter << std::endl;
+
+    std::filebuf fb; 
+    fb.open("histogram.xml", std::ios::out );
+    std::ostream os(&fb);     
+    int indent = 3; 
+    std::string elementName = "SF_ToA Histogram"; 
+    hgm.SerializeToXmlStream(os, indent, elementName); 
+    fb.close();
+
+    Gnuplot hgm_plot("Histogram.png");
+    hgm_plot.SetTitle("Time of Air / Number of Packets");
+    hgm_plot.SetTerminal("png"); 
+    hgm_plot.SetLegend("Time of Air (s)", "Packets Count");
+    hgm_plot.AppendExtra("set xrange [0:0.25]");
+    hgm_plot.AddDataset(hist_df7);
+    hgm_plot.AddDataset(hist_df8);
+    hgm_plot.AddDataset(hist_df12);    
+    std::ofstream histfile("Hist.plt"); 
+    hgm_plot.GenerateOutput(histfile); 
+    histfile.close(); 
+    
+    Gnuplot onair_plot("OnAirTime.png");
+    onair_plot.SetTitle("OnAir Time of Response"); 
+    onair_plot.SetTerminal("png"); 
+    onair_plot.SetLegend("Packet ID" , "Time(s)"); 
+    onair_plot.AppendExtra(ft_string);
+    onair_plot.AddDataset(onair_df); 
+    
+    std::ofstream onairfile("OnAirTime.plt"); 
+    onair_plot.GenerateOutput(onairfile); 
+    onairfile.close(); 
+
+    // Gnuplot gp; 
+    // gp << "set boxwidth 0.002\n"; 
+    // gp << "set style fill solid\n";  
+    // gp << "set xlabel 'Time of air (sec)'\n";
+    // gp << "set ylabel 'Number of Packets'\n";
+    // gp << "set title 'Packet Transmission Time of Air Distribution'\n";
+    // gp << "plot '-' using 1:2 with boxes notitle\n";
+    // gp.send1d(packetData);  
+    
+    // std::cout<<"Accepted Devices in Network =>" << Count_Acc_EDs.at(szi)<<std::endl; 
+    // std::cout<<"Indangered Devices In Event => "<<get<0>(Regard_EM.at(szi))<<std::endl; 
+    // std::cout<<"Informed Endangered Devices => " << get<1>(Regard_EM.at(szi))<<std::endl;
+
+    Gnuplot regard_plot("Informed Devices.png");
+    regard_plot.SetTitle("Emergency Disaster"); 
+    regard_plot.SetTerminal("png"); 
+    regard_plot.SetLegend("In Danger","Informed"); 
+    regard_plot.AppendExtra(filteredString); 
+    regard_plot.AppendExtra("set yrange [0:2500]"); 
+
+    Gnuplot2dDataset accepted;
+    accepted.SetTitle("Accepted"); 
+    accepted.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+    Gnuplot2dDataset indanger;
+    indanger.SetTitle("In Danger"); 
+    indanger.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+    Gnuplot2dDataset informed;
+    informed.SetTitle("Informed"); 
+    informed.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+    
+    double y_accepted,y_in_danger,y_informed; 
+
+    for(uint32_t szi=0; szi < Count_Acc_EDs.size(); szi++){
+        x = szi;
+        y_accepted = Count_Acc_EDs.at(x); 
+        y_in_danger = get<0>(Regard_EM.at(x));
+        y_informed = get<1>(Regard_EM.at(x));
+        accepted.Add(x,0); 
+        accepted.Add(x,y_accepted); 
+        indanger.Add(x,0);
+        indanger.Add(x,y_in_danger); 
+        informed.Add(x,0);
+        informed.Add(x,y_informed); 
+    }
+
+    regard_plot.AddDataset(accepted);
+    regard_plot.AddDataset(indanger); 
+    regard_plot.AddDataset(informed);
+    std::ofstream regard_file("Regard_file.plt"); 
+    regard_plot.GenerateOutput(regard_file); 
+    regard_file.close(); 
+    
+    Count_Acc_EDs.clear(); 
+    //Count_Endangered.clear(); 
+    Regard_EM.clear();
+
+    std::ofstream outputFile("sent_data_statistics.csv"); 
+    if(outputFile.is_open()){
+        for(uint32_t szi=0; szi<SentByEDs.size(); szi++){
+            x = szi; //Packet
+            outputFile << x << "," 
+                       << get<0>(SentByEDs.at(szi)) << ","
+                       << get<1>(SentByEDs.at(szi)) << ","
+                       << get<2>(SentByEDs.at(szi)) << ","
+                       << get<3>(SentByEDs.at(szi)) << endl;            
+            // std::cout<<"Number of position " << SentByEDs.at(szi) << std::endl;
+            // std::cout<<"Number of size " << SentByEDs.size() << " " << szi<< std::endl;
+            
+        }
+        outputFile.close(); 
+    }else {
+        cerr<<"Error opening the file."<<endl; 
+        return 1; 
+    }
+    
+    std::cout<<"Execution of program finished with a total of " << repetitions << " repetitions. \nClosing simulation..." <<std::endl;
     return 0;
 
 }
